@@ -1,5 +1,12 @@
 # Local Windows Build
 
+Current local build: **v1.16.3**. See FIX_v1.16.3.md for the reported RGBA16F
+desktop capture failure, regression evidence and artifact checksums. The new
+artifacts are ../MHY_Scanner_v1.16.3.exe and ../MHY_Scanner_v1.16.3.zip; the
+matching installed runtime/PDB is in install-ui/MHY_Scanner_1.16.3. The ZIP's
+entry point is MHY_Scanner_v1.16.3.exe. No account configuration is packaged.
+The earlier v1.16.2 artifacts and their verification record below are preserved.
+
 Toolchain: MSVC 19.44.35227, Windows SDK 10.0.26100.0, x64 Release, C++23, /MD.
 Qt: 6.8.0 win64_msvc2022_64 (the existing CI version).
 vcpkg baseline: 57987637aac17d62bac535bc839baca3754490e6.

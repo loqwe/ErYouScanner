@@ -101,7 +101,7 @@ int main(int argc, char** argv)
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 6; ++c) ui.tableWidget->setItem(r, c, new QTableWidgetItem(row[c]));
     ui.tableWidget->selectRow(0);
-    ui.label_3->setText("1.16.2");
+    ui.label_3->setText("1.16.3");
     ui.lineEditUname->setText(row[2]);
     ui.lineEditLiveId->setEditText("123456");
     ui.checkBoxAutoLogin->setChecked(true);

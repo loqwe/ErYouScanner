@@ -117,6 +117,8 @@ public:
 
     bool copyFrameToBuffer(BYTE* buffer, std::size_t bufferSize)
     {
+        m_CopyStage = "state";
+        m_RowPitch = 0;
         if (!m_Frame || !m_FrameHeld || !m_Context || !buffer)
         {
             m_LastError = E_INVALIDARG;
@@ -124,17 +126,21 @@ public:
         }
         D3D11_TEXTURE2D_DESC desc{};
         m_Frame->GetDesc(&desc);
-        if (desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM || desc.SampleDesc.Count != 1)
+        m_CopyStage = "texture-format";
+        if ((desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM &&
+             desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) ||
+            desc.SampleDesc.Count != 1 || desc.MipLevels != 1 || desc.ArraySize != 1)
         {
             m_LastError = E_INVALIDARG;
             return false;
         }
-        if (!m_Staging || m_Width != desc.Width || m_Height != desc.Height)
+        if (!m_Staging || m_Width != desc.Width || m_Height != desc.Height || m_Format != desc.Format)
         {
             m_Staging.Reset();
             desc.Usage = D3D11_USAGE_STAGING;
             desc.BindFlags = desc.MiscFlags = 0;
             desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            m_CopyStage = "create-staging";
             m_LastError = m_Device->CreateTexture2D(&desc, nullptr, m_Staging.GetAddressOf());
             if (FAILED(m_LastError))
             {
@@ -142,16 +148,21 @@ public:
             }
             m_Width = desc.Width;
             m_Height = desc.Height;
+            m_Format = desc.Format;
         }
         m_Context->CopyResource(m_Staging.Get(), m_Frame.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
+        m_CopyStage = "map-staging";
         m_LastError = m_Context->Map(m_Staging.Get(), 0, D3D11_MAP_READ, 0, &mapped);
         if (FAILED(m_LastError))
         {
             return false;
         }
-        const bool copied = CopyScreenBGRA(buffer, bufferSize, mapped.pData,
-            mapped.RowPitch, m_Width, m_Height);
+        m_RowPitch = mapped.RowPitch;
+        m_CopyStage = "convert-buffer";
+        const bool copied = m_Format == DXGI_FORMAT_R16G16B16A16_FLOAT ?
+            CopyScreenRGBA16FToBGRA(buffer, bufferSize, mapped.pData, mapped.RowPitch, m_Width, m_Height) :
+            CopyScreenBGRA(buffer, bufferSize, mapped.pData, mapped.RowPitch, m_Width, m_Height);
         m_Context->Unmap(m_Staging.Get(), 0);
         if (!copied)
         {
@@ -159,6 +170,16 @@ public:
         }
         return copied;
     }
+
+    D3D11_TEXTURE2D_DESC frameDescription() const
+    {
+        D3D11_TEXTURE2D_DESC desc{};
+        if (m_Frame) m_Frame->GetDesc(&desc);
+        return desc;
+    }
+
+    const char* lastCopyStage() const { return m_CopyStage; }
+    UINT lastRowPitch() const { return m_RowPitch; }
 
     bool doneWithFrame()
     {
@@ -222,6 +243,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_Staging;
     UINT m_Width = 0;
     UINT m_Height = 0;
+    DXGI_FORMAT m_Format = DXGI_FORMAT_UNKNOWN;
+    const char* m_CopyStage = "none";
+    UINT m_RowPitch = 0;
     HRESULT m_LastError = S_OK;
     bool m_FrameHeld = false;
     bool m_Valid = false;

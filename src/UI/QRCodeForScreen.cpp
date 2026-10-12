@@ -87,6 +87,7 @@ void QRCodeForScreen::monitorScreen(bool official)
         throw std::runtime_error("Invalid desktop frame size");
     }
     std::vector<unsigned char> buffer(static_cast<std::size_t>(width) * height * 4);
+    DXGI_FORMAT lastFormat = DXGI_FORMAT_UNKNOWN;
     cv::Mat lastGoodFrame;
     QThreadPool pool;
     pool.setMaxThreadCount(threadNumber);
@@ -104,9 +105,30 @@ void QRCodeForScreen::monitorScreen(bool official)
         cv::Mat image;
         if (result == 0)
         {
+            const auto desc = capture.frameDescription();
+            if (!desc.Width || !desc.Height || desc.Width > INT_MAX || desc.Height > INT_MAX ||
+                desc.Width > maximum / 4 || desc.Height > maximum / (static_cast<std::size_t>(desc.Width) * 4))
+            {
+                WriteScannerLog("screen: invalid acquired frame dimensions");
+                capture.doneWithFrame();
+                captureFailed = true;
+                break;
+            }
+            if (lastFormat != desc.Format || width != static_cast<int>(desc.Width) || height != static_cast<int>(desc.Height))
+            {
+                WriteScannerLog("screen: frame width=" + std::to_string(desc.Width) +
+                    " height=" + std::to_string(desc.Height) + " format=" + std::to_string(desc.Format));
+                lastFormat = desc.Format;
+            }
+            width = static_cast<int>(desc.Width);
+            height = static_cast<int>(desc.Height);
+            buffer.resize(static_cast<std::size_t>(width) * height * 4);
             if (!capture.copyFrameToBuffer(buffer.data(), buffer.size()))
             {
-                WriteScannerLog("screen: frame copy failed hr=" + std::to_string(capture.lastError()));
+                WriteScannerLog("screen: frame copy failed hr=" + std::to_string(capture.lastError()) +
+                    " stage=" + capture.lastCopyStage() + " format=" + std::to_string(desc.Format) +
+                    " width=" + std::to_string(width) + " height=" + std::to_string(height) +
+                    " rowPitch=" + std::to_string(capture.lastRowPitch()) + " capacity=" + std::to_string(buffer.size()));
                 capture.doneWithFrame();
                 captureFailed = true;
                 break;

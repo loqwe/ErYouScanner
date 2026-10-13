@@ -1,11 +1,16 @@
 # Local Windows Build
 
-Current local build: **v1.16.3**. See FIX_v1.16.3.md for the reported RGBA16F
-desktop capture failure, regression evidence and artifact checksums. The new
-artifacts are ../MHY_Scanner_v1.16.3.exe and ../MHY_Scanner_v1.16.3.zip; the
-matching installed runtime/PDB is in install-ui/MHY_Scanner_1.16.3. The ZIP's
-entry point is MHY_Scanner_v1.16.3.exe. No account configuration is packaged.
-The earlier v1.16.2 artifacts and their verification record below are preserved.
+Current local build: **v1.16.4** (official accounts only, by owner request).
+See FIX_v1.16.4.md for B-server removal, worker exception protection,
+fatal logging, verification and checksums. Distribute only
+../MHY_Scanner_v1.16.4.zip; its entry point is MHY_Scanner_v1.16.4.exe.
+The matching installed runtime/PDB is in install-ui/MHY_Scanner_1.16.4.
+No account configuration, logs or crash dumps are packaged. GitHub releases
+should carry the ZIP only, as requested by the repository owner.
+The earlier v1.16.2/v1.16.3 artifacts and verification records are preserved.
+The earlier local v1.16.4 test package/runtime are backed up separately with
+the suffix before_bili_removal. Build the final ZIP from
+build/package-v1.16.4-official-only; see CHANGELOG.md for user-facing changes.
 
 Toolchain: MSVC 19.44.35227, Windows SDK 10.0.26100.0, x64 Release, C++23, /MD.
 Qt: 6.8.0 win64_msvc2022_64 (the existing CI version).
@@ -45,6 +50,9 @@ packaged Qt dependency for the tracked login-confirmation task. Its current
 template-only usage does not add a Qt6Concurrent.dll import to the EXE.
 
 ## Generated Artifacts
+
+The following entries describe the preserved v1.16.2 build. Current v1.16.4
+artifacts and startup verification are recorded in FIX_v1.16.4.md.
 
 - ../MHY_Scanner_v1.16.2.exe: versioned EXE with malformed live-packet recovery.
   It can use the original compatible Qt 6.8.0 and FFmpeg 63/61/10 DLLs and ScanModel.

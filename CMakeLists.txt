@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.26)
 project(MHY_Scanner
-	VERSION 1.16.3
+	VERSION 1.16.4
 	LANGUAGES CXX
 )
 
@@ -88,7 +88,6 @@ add_executable(${PROJECT_NAME}
 	"${CMAKE_SOURCE_DIR}/src/Core/ScreenScan.h"
 	"${CMAKE_SOURCE_DIR}/src/Core/ConfigDate.cpp"
 	"${CMAKE_SOURCE_DIR}/src/Core/ConfigDate.h"
-	"${CMAKE_SOURCE_DIR}/src/Core/BSGameSDK.hpp"
 	"${CMAKE_SOURCE_DIR}/src/Core/CookieParser.hpp"
 	"${CMAKE_SOURCE_DIR}/src/Core/CreateUUID.hpp"
 	"${CMAKE_SOURCE_DIR}/src/Core/ScannerBase.hpp"

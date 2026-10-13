@@ -15,15 +15,6 @@
 #include "WindowAbout.h"
 #include "ConfirmationDelay.hpp"
 
-class OnlineUpdate :
-    public QThread
-{
-public:
-    OnlineUpdate() = default;
-    void run();
-    ~OnlineUpdate();
-};
-
 class configInitLoad :
     public QThread
 {
@@ -73,11 +64,15 @@ Q_SIGNALS:
     void AccountError();
     void LiveStreamLinkError(LiveStreamStatus status);
     void AccountNotSelected();
+    void AccountUnsupported();
+    void BackgroundError();
     void StartScanScreen();
     void StartScanLive();
 
 private:
     void scheduleConfirmation(bool screen);
+    QThreadPool backgroundTasks;
+    std::atomic_bool closing{false};
     ConfirmationDelay confirmationDelay{this};
     QFuture<void> confirmationJob;
     void failure();
@@ -91,7 +86,6 @@ private:
     int getSelectedRowIndex();
     bool checkDuplicates(const std::string uid);
     bool GetStreamLink(LivePlatform platform, const std::string& roomid, std::string& url, std::map<std::string, std::string>& heards);
-    OnlineUpdate o;
     configInitLoad configinitload;
     void SetWindowToFront() const;
     WindowLogin* windowLogin{};

@@ -49,8 +49,8 @@ protected:
 
 private:
     WindowGeeTest m_WindowGeeTest{ this };
-    std::array<QWidget*, 4> tabs{};
-    static constexpr std::array<const std::string_view, 4> tabsName{ "短信登录", "扫码登录", "Cookie登录", "Bilibili崩坏3登录" };
+    std::array<QWidget*, 3> tabs{};
+    static constexpr std::array<const std::string_view, 3> tabsName{ "短信登录", "扫码登录", "Cookie登录" };
     QTabWidget* tabWidget{};
     QHBoxLayout* MainHLayout{};
 
@@ -87,20 +87,8 @@ private:
     QPushButton* pBtofficialreject{};
     QHBoxLayout* Tab2ButtonHLayout{};
 
-    void InitTabs3();
-    QVBoxLayout* Tab3MainVLayout{};
-    QVBoxLayout* Tab3VLayout0{};
-    QLineEdit* lineEditAccount{};
-    QLineEdit* lineEditPwd{};
-    QVBoxLayout* Tab3VLayout1{};
-    QCheckBox* checkBoxShowPw{};
-    QHBoxLayout* Tab3HLayout2{};
-    QPushButton* Tab3pBtConfirm{};
-    QPushButton* Tab3pBtCancel{};
-
     void Initconnect();
 
-    void ResultByLoginBH3BiLiBiLi(const auto& result);
     void ResultByLoginOfficial(const auto& result);
     void StartQRCodeLogin();
     void CheckQRCodeLoginState();

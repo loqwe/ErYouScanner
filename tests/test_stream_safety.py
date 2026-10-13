@@ -1,4 +1,4 @@
-"""Source guards for the two live-stream scanning paths (no Qt SDK required)."""
+"""Source guards for official live-stream scanning (no Qt SDK required)."""
 
 import pathlib
 import re
@@ -10,20 +10,20 @@ SOURCE = (ROOT / "src/UI/QRCodeForStream.cpp").read_text(encoding="utf-8-sig")
 
 
 class StreamSafetyTests(unittest.TestCase):
-    def test_both_paths_skip_invalid_video_packets(self):
+    def test_official_path_skips_invalid_video_packets(self):
         branches = SOURCE.split("if (sendResult == AVERROR_INVALIDDATA)")[1:]
-        self.assertEqual(len(branches), 2)
+        self.assertEqual(len(branches), 1)
         for branch in branches:
             recover = branch.split("continue;", 1)[0]
             self.assertIn("av_packet_unref(pAVPacket)", recover)
             self.assertNotIn("ret = ScanRet::STREAMERROR", recover)
             self.assertNotIn("stop()", recover)
 
-    def test_both_paths_skip_invalid_decoded_frames(self):
-        self.assertEqual(SOURCE.count("receiveResult != AVERROR_INVALIDDATA"), 2)
-        self.assertEqual(SOURCE.count("stream: skipping invalid decoded frame"), 2)
+    def test_official_path_skips_invalid_decoded_frames(self):
+        self.assertEqual(SOURCE.count("receiveResult != AVERROR_INVALIDDATA"), 1)
+        self.assertEqual(SOURCE.count("stream: skipping invalid decoded frame"), 1)
         branches = SOURCE.split("if (receiveResult == AVERROR_INVALIDDATA)")[1:]
-        self.assertEqual(len(branches), 2)
+        self.assertEqual(len(branches), 1)
         for branch in branches:
             recovery = branch.split("cv::Mat img", 1)[0]
             self.assertIn("continue;", recovery)
@@ -42,15 +42,15 @@ class StreamSafetyTests(unittest.TestCase):
         self.assertNotIn("sws_getContext", init)
         self.assertNotIn("sws_getCachedContext", init)
 
-    def test_both_scanners_use_checked_frame_conversion(self):
-        self.assertEqual(SOURCE.count("if (!convertFrame(img))"), 2)
+    def test_official_path_uses_checked_frame_conversion(self):
+        self.assertEqual(SOURCE.count("if (!convertFrame(img))"), 1)
 
     def test_no_single_element_scaler_arrays(self):
         self.assertIsNone(re.search(r"dst(?:Data|Linesize)\s*\[1\]", SOURCE))
 
     def test_audio_packets_are_released(self):
         paths = SOURCE.split("if (pAVPacket->stream_index != videoStreamIndex)")[1:]
-        self.assertEqual(len(paths), 2)
+        self.assertEqual(len(paths), 1)
         for path in paths:
             self.assertIn("av_packet_unref(pAVPacket)", path.split("continue;", 1)[0])
 
@@ -64,8 +64,8 @@ class StreamSafetyTests(unittest.TestCase):
         self.assertIn("interrupt_callback", init)
         self.assertLess(init.index("interrupt_callback"), init.index("avformat_open_input"))
 
-    def test_both_paths_submit_latest_frame(self):
-        self.assertEqual(SOURCE.count("submitFrame(std::move(img))"), 2)
+    def test_official_path_submits_latest_frame(self):
+        self.assertEqual(SOURCE.count("submitFrame(std::move(img))"), 1)
         self.assertIn("pendingFrame = std::move(img)", SOURCE)
 
     def test_ready_is_emitted_only_after_checked_conversion(self):

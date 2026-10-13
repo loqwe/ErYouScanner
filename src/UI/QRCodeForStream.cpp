@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "QRScanner.h"
+#include "ScannerTask.hpp"
 #include "MhyApi.hpp"
 #include "StreamFrameConverter.hpp"
 
@@ -16,8 +17,7 @@ QRCodeForStream::QRCodeForStream(QObject* parent) :
     pAVFrame(nullptr),
     pAVPacket(nullptr),
     pAVCodecContext(nullptr),
-    m_stop(false),
-    servertype(ServerType::Official)
+    m_stop(false)
 
 {
     av_log_set_level(AV_LOG_FATAL);
@@ -33,29 +33,11 @@ QRCodeForStream::~QRCodeForStream()
     av_dict_free(&pAvdictionary);
 }
 
-void QRCodeForStream::setLoginInfo(const std::string_view uid, const std::string_view gameToken)
-{
-    this->uid = uid;
-    this->gameToken = gameToken;
-}
-
-void QRCodeForStream::setLoginInfo(const std::string_view uid, const std::string_view gameToken, const std::string& name)
-{
-    this->uid = uid;
-    this->gameToken = gameToken;
-    this->m_name = name;
-}
-
 void QRCodeForStream::setLoginInfo1(const std::string_view uid, const std::string_view stoken, const std::string_view mid)
 {
     this->uid = uid;
     this->gameToken = stoken;
     this->mid = mid;
-}
-
-void QRCodeForStream::setServerType(const ServerType servertype)
-{
-    this->servertype = servertype;
 }
 
 void QRCodeForStream::LoginOfficial()
@@ -146,93 +128,6 @@ void QRCodeForStream::LoginOfficial()
     }
 }
 
-void QRCodeForStream::LoginBH3BiliBili()
-{
-    while (m_stop.load())
-    {
-        if (readDeadline.expired(av_gettime_relative()))
-        {
-            WriteScannerLog("stream: no decoded video frame within deadline");
-            ret = ScanRet::STREAMERROR;
-            break;
-        }
-        if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
-        {
-            if (m_stop.load())
-            {
-                ret = readDeadline.expired(av_gettime_relative()) ? ScanRet::STREAMERROR : ScanRet::LIVESTOP;
-            }
-            break;
-        }
-        if (pAVPacket->stream_index != videoStreamIndex)
-        {
-            av_packet_unref(pAVPacket);
-            continue;
-        }
-        const int sendResult = avcodec_send_packet(pAVCodecContext, pAVPacket);
-        if (sendResult == AVERROR_INVALIDDATA)
-        {
-            WriteScannerLog("stream: skipping invalid video packet");
-            av_packet_unref(pAVPacket);
-            continue;
-        }
-        if (sendResult < 0)
-        {
-            WriteScannerLog("stream: send packet error=" + std::to_string(sendResult));
-            av_packet_unref(pAVPacket);
-            ret = ScanRet::STREAMERROR;
-            break;
-        }
-        if (pAVFrame == nullptr)
-        {
-            std::cerr << "Error allocating frame" << std::endl;
-            ret = ScanRet::LIVESTOP;
-            break;
-        }
-
-        int receiveResult = AVERROR(EAGAIN);
-        while (m_stop.load())
-        {
-            receiveResult = avcodec_receive_frame(pAVCodecContext, pAVFrame);
-            if (receiveResult == AVERROR_INVALIDDATA)
-            {
-                WriteScannerLog("stream: skipping invalid decoded frame");
-                if (readDeadline.expired(av_gettime_relative()))
-                {
-                    ret = ScanRet::STREAMERROR;
-                    stop();
-                    break;
-                }
-                continue;
-            }
-            if (receiveResult < 0)
-            {
-                break;
-            }
-            cv::Mat img;
-            if (!convertFrame(img))
-            {
-                ret = ScanRet::STREAMERROR;
-                stop();
-                break;
-            }
-#ifndef SHOW
-            cv::imshow("Video_Stream", img);
-            cv::waitKey(1);
-#endif
-            submitFrame(std::move(img));
-        }
-        if (m_stop.load() && receiveResult != AVERROR(EAGAIN) && receiveResult != AVERROR_EOF &&
-            receiveResult != AVERROR_INVALIDDATA)
-        {
-            WriteScannerLog("stream: receive frame error=" + std::to_string(receiveResult));
-            ret = ScanRet::STREAMERROR;
-            stop();
-        }
-        av_frame_unref(pAVFrame);
-        av_packet_unref(pAVPacket);
-    }
-}
 
 int QRCodeForStream::interruptStream(void* opaque)
 {
@@ -274,45 +169,31 @@ void QRCodeForStream::scanFrame(const cv::Mat& img)
             return;
         }
         std::string ticket;
-        if (!parseOfficialQRCode(str, ticket) || lastTicket == ticket ||
-            (servertype == ServerType::BH3_BiliBili && gameType != GameType::Honkai3))
+        if (!parseOfficialQRCode(str, ticket) || lastTicket == ticket)
         {
             return;
         }
-        bool success = false;
-        if (servertype == ServerType::Official)
+        const std::string passportQrUrl = PandaScanQRCode(scanUrl, ticket, gameType);
+        const bool success = !passportQrUrl.empty();
+        if (success)
         {
-            const std::string passportQrUrl = PandaScanQRCode(scanUrl, ticket, gameType);
-            success = !passportQrUrl.empty();
-            if (success)
-            {
-                lastQrCode = passportQrUrl;
-            }
-            else
-            {
-                Q_EMIT loginResults(ScanRet::FAILURE_1);
-            }
+            lastQrCode = passportQrUrl;
         }
         else
         {
-            const ScanRet result = scanCheck(ticket);
-            success = result == ScanRet::SUCCESS;
-            if (!success)
-            {
-                Q_EMIT loginResults(result);
-            }
+            Q_EMIT loginResults(ScanRet::FAILURE_1);
         }
         if (success)
         {
             lastTicket = ticket;
             stop();
-            Q_EMIT loginConfirm(servertype == ServerType::Official ? gameType : GameType::Honkai3_BiliBili, false);
+            Q_EMIT loginConfirm(gameType, false);
         }
         stop();
     }
-    catch (const std::exception&)
+    catch (...)
     {
-        WriteScannerLog("stream: QR worker exception");
+        LogScannerException("stream: QR worker");
         stop();
         Q_EMIT loginResults(ScanRet::STREAMERROR);
     }
@@ -471,32 +352,9 @@ auto QRCodeForStream::init() -> bool
 
 void QRCodeForStream::continueLastLogin()
 {
-    switch (servertype)
-    {
-        using enum ServerType;
-    case Official:
-    {
-        bool b = ScanPassportQRLogin(lastQrCode, gameToken, mid) &&
-                 ConfirmPassportQRLogin(lastQrCode, gameToken, mid);
-        if (b)
-        {
-            Q_EMIT loginResults(ScanRet::SUCCESS);
-        }
-        else
-        {
-            Q_EMIT loginResults(ScanRet::FAILURE_2);
-        }
-    }
-    break;
-    case BH3_BiliBili:
-    {
-        const ScanRet result = scanConfirm(lastTicket, uid, gameToken, m_name);
-        Q_EMIT loginResults(result);
-    }
-    break;
-    default:
-        break;
-    }
+    const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) &&
+                          ConfirmPassportQRLogin(lastQrCode, gameToken, mid);
+    Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2);
 }
 
 void QRCodeForStream::run()
@@ -520,27 +378,16 @@ void QRCodeForStream::run()
 #ifndef SHOW
             cv::namedWindow("Video_Stream", cv::WINDOW_AUTOSIZE);
 #endif
-            switch (servertype)
-            {
-                using enum ServerType;
-            case Official:
-                LoginOfficial();
-                break;
-            case BH3_BiliBili:
-                LoginBH3BiliBili();
-                break;
-            default:
-                break;
-            }
+            LoginOfficial();
         }
         else if (!m_cancelled.load())
         {
             ret = ScanRet::STREAMERROR;
         }
     }
-    catch (const std::exception&)
+    catch (...)
     {
-        WriteScannerLog("stream: decoder exception");
+        LogScannerException("stream: decoder");
         ret = ScanRet::STREAMERROR;
     }
     stop();
@@ -555,9 +402,9 @@ void QRCodeForStream::run()
     {
         cv::destroyWindow("Video_Stream");
     }
-    catch (const cv::Exception&)
+    catch (...)
     {
-        WriteScannerLog("stream: preview cleanup failed");
+        LogScannerException("stream: preview cleanup");
     }
 #endif
     avformat_close_input(&pAVFormatContext);

@@ -17,7 +17,7 @@
 #include <QSignalBlocker>
 
 #include "MhyApi.hpp"
-#include "BSGameSDK.hpp"
+#include "ScannerTask.hpp"
 
 WindowMain::WindowMain(QWidget* parent) :
     QMainWindow(parent),
@@ -26,6 +26,7 @@ WindowMain::WindowMain(QWidget* parent) :
 {
     QApplication::setFont(QFont("微软雅黑", 9));
     ui.setupUi(this);
+    WriteScannerLog("startup: version=" MHY_Scanner_VERSION);
     ui.spinConfirmDelay->setEnabled(false);
     connect(ui.action1_3, &QAction::triggered, this, &WindowMain::AddAccount);
     connect(ui.action1_4, &QAction::triggered, this, &WindowMain::SetDefaultAccount);
@@ -62,6 +63,15 @@ WindowMain::WindowMain(QWidget* parent) :
         pBtStop();
     });
     connect(ui.checkBoxAutoScreen, &QCheckBox::clicked, this, &WindowMain::checkBoxAutoScreen);
+    connect(this, &WindowMain::BackgroundError, this, [this]() {
+        if (closing.load()) return;
+        pBtStop();
+        QMessageBox::information(this, "提示", "后台请求失败，请查看 Config/scanner.log 中的异常记录。", QMessageBox::Yes);
+    });
+    connect(this, &WindowMain::AccountUnsupported, this, [this]() {
+        pBtStop();
+        QMessageBox::information(this, "提示", "该账号类型已停止支持，请选择官服账号。旧记录可以从账号管理中手动删除。", QMessageBox::Yes);
+    });
     connect(ui.checkBoxAutoExit, &QCheckBox::clicked, this, &WindowMain::checkBoxAutoExit);
     connect(ui.checkBoxAutoLogin, &QCheckBox::clicked, this, &WindowMain::checkBoxAutoLogin);
     connect(ui.spinConfirmDelay, &QDoubleSpinBox::valueChanged, this, [this](double seconds) {
@@ -79,7 +89,7 @@ WindowMain::WindowMain(QWidget* parent) :
     connect(ui.tableWidget, &QTableWidget::itemChanged, this, &WindowMain::updateNote);
 
     QThreadPool::globalInstance()->setMaxThreadCount(QThread::idealThreadCount());
-    o.start();
+    backgroundTasks.setMaxThreadCount(2);
     ui.tableWidget->setColumnCount(6);
     QStringList header;
     header << "序号"
@@ -123,8 +133,11 @@ WindowMain::WindowMain(QWidget* parent) :
 
 WindowMain::~WindowMain()
 {
+    closing.store(true);
+    backgroundTasks.clear();
     confirmationDelay.cancel();
     confirmationJob.waitForFinished();
+    backgroundTasks.waitForDone();
     t1.stop();
     t2.stop();
 }
@@ -261,7 +274,7 @@ void WindowMain::startAccountSelfCheck()
     }
 
     std::vector<std::tuple<int, std::string, std::string, std::string, std::string>> accounts;
-    const int accountCount = std::min(userinfo.value("num", 0), static_cast<int>(userinfo["account"].size()));
+    const int accountCount = std::max(0, std::min(userinfo.value("num", 0), static_cast<int>(userinfo["account"].size())));
     accounts.reserve(accountCount);
 
     for (int i = 0; i < accountCount; ++i)
@@ -283,10 +296,10 @@ void WindowMain::startAccountSelfCheck()
     }
 
     QPointer<WindowMain> self(this);
-    QThreadPool::globalInstance()->start([self, accounts = std::move(accounts)] {
+    backgroundTasks.start(MakeScannerTask("account-check: worker", [self, accounts = std::move(accounts)] {
         for (const auto& [row, type, token, uid, mid] : accounts)
         {
-            if (!self)
+            if (!self || self->closing.load())
             {
                 return;
             }
@@ -297,35 +310,35 @@ void WindowMain::startAccountSelfCheck()
                 });
 
             bool valid = false;
-            QString status = "失效";
-            if (!uidLooksValid)
-            {
-                status = "UID异常";
-            }
-            else if (type == "官服")
-            {
-                valid = !token.empty() && !mid.empty() && CheckStokenValid(token, mid);
-                status = valid ? "有效" : "失效";
-            }
-            else if (type == "崩坏3B服")
-            {
-                const auto result = BSGameSDK::BH3::GetUserInfo(uid, token);
-                valid = result.code == 0;
-                status = valid ? "有效" : "失效";
-            }
-            else
-            {
-                status = "未知类型";
-            }
+            QString status = "检测失败";
+            const std::string phase = "account-check: row=" + std::to_string(row + 1);
+            WriteScannerLog(phase + " begin");
+            const bool checked = RunScannerTask(phase.c_str(), [&] {
+                if (type != "官服")
+                {
+                    status = "不支持";
+                    WriteScannerLog(phase + " unsupported account type; skipped");
+                }
+                else if (!uidLooksValid)
+                {
+                    status = "UID异常";
+                }
+                else if (type == "官服")
+                {
+                    valid = !token.empty() && !mid.empty() && CheckStokenValid(token, mid);
+                    status = valid ? "有效" : "失效";
+                }
+            });
+            WriteScannerLog(phase + " complete checked=" + std::to_string(checked) + " valid=" + std::to_string(valid));
 
             QMetaObject::invokeMethod(self.data(), [self, row, valid, status]() {
-                if (self)
+                if (self && !self->closing.load())
                 {
                     self->setAccountCheckStatus(row, valid, status);
                 }
             }, Qt::QueuedConnection);
         }
-    });
+    }));
 }
 
 void WindowMain::insertTableItems(QString uid, QString userName, QString type, QString notes)
@@ -367,12 +380,8 @@ void WindowMain::AddAccount()
             QMessageBox::information(this, "提示", "该账号已添加，无需重复添加", QMessageBox::Yes);
             return;
         }
-        //TODO 有预期外信号触发,潜在bug
-        insertTableItems(QString::fromStdString(uid), QString::fromStdString(name), QString::fromStdString(type), "");
-        countA = ui.tableWidget->rowCount() - 1;
-        ui.tableWidget->setCurrentCell(countA, 0);
-        ui.lineEditUname->setText(QString::fromStdString(name));
-        QThreadPool::globalInstance()->start([this, token, uid, name, type, mid] {
+        // Account state belongs to the UI thread, not an untracked pool worker.
+        const bool saved = RunScannerTask("account-save", [&] {
             int num{ userinfo["num"] };
             userinfo["account"][num]["access_key"] = token;
             userinfo["account"][num]["uid"] = uid;
@@ -383,13 +392,21 @@ void WindowMain::AddAccount()
             userinfo["num"] = num + 1;
             m_config->updateConfig(userinfo.dump());
         });
-        QMessageBox::information(this, "提示", "添加成功", QMessageBox::Yes);
+        if (saved)
+        {
+            insertTableItems(QString::fromStdString(uid), QString::fromStdString(name), QString::fromStdString(type), "");
+            countA = ui.tableWidget->rowCount() - 1;
+            ui.tableWidget->setCurrentCell(countA, 0);
+            ui.lineEditUname->setText(QString::fromStdString(name));
+        }
+        QMessageBox::information(this, "提示", saved ? "添加成功" : "账号保存失败，请查看日志", QMessageBox::Yes);
     });
     windowLogin->show();
 }
 
 void WindowMain::pBtstartScreen(bool clicked)
 {
+    if (closing.load()) return;
     if (confirmationDelay.pending())
     {
         pBtStop();
@@ -398,53 +415,51 @@ void WindowMain::pBtstartScreen(bool clicked)
     ui.pBtstartScreen->setEnabled(false);
     ui.pBtStream->setEnabled(false);
     ui.pBtstartScreen->setText("加载中。。。");
-    QApplication::processEvents();
-    QThreadPool::globalInstance()->start([&, clicked]() {
+    const int selectedRow = countA;
+    nlohmann::json account;
+    if (!RunScannerTask("screen: account snapshot", [&] {
+        if (clicked && selectedRow >= 0) account = userinfo.at("account").at(selectedRow);
+    }, [this] { Q_EMIT BackgroundError(); })) return;
+    backgroundTasks.start(MakeScannerTask("screen: startup", [this, clicked, selectedRow, account = std::move(account)]() {
+        WriteScannerLog("screen: startup begin");
         if (!clicked)
         {
             emit StopScanner();
             return;
         }
         //FIXME 没有及时更新
-        if (countA == -1)
+        if (selectedRow == -1)
         {
             emit AccountNotSelected();
             return;
         }
-        if (std::string type = userinfo["account"][countA]["type"]; type == "官服")
+        if (std::string type = account.at("type"); type == "官服")
         {
-            std::string stoken = userinfo["account"][countA]["access_key"];
-            std::string uid = userinfo["account"][countA]["uid"];
-            std::string mid = userinfo["account"][countA]["mid"];
+            std::string stoken = account.at("access_key");
+            std::string uid = account.at("uid");
+            std::string mid = account.at("mid");
             if (!CheckStokenValid(stoken, mid))
             {
                 emit AccountError();
                 return;
             }
-            t1.setServerType(ServerType::Official);
             t1.setLoginInfo1(uid, stoken, mid);
         }
-        else if (type == "崩坏3B服")
+        else
         {
-            std::string stoken{ userinfo["account"][countA]["access_key"] };
-            std::string uid{ userinfo["account"][countA]["uid"] };
-            //可用性检查
-            auto result{ BSGameSDK::BH3::GetUserInfo(uid, stoken) };
-            if (result.code != 0)
-            {
-                emit AccountError();
-                return;
-            }
-            t1.setServerType(ServerType::BH3_BiliBili);
-            t1.setLoginInfo(uid, stoken, result.uname);
+            WriteScannerLog("screen: unsupported account type; startup rejected");
+            emit AccountUnsupported();
+            return;
         }
+        if (closing.load()) return;
         t1.start();
         emit StartScanScreen();
-    });
+    }, [this] { Q_EMIT BackgroundError(); }));
 }
 
 void WindowMain::pBtStream(bool clicked)
 {
+    if (closing.load()) return;
     if (confirmationDelay.pending())
     {
         pBtStop();
@@ -453,7 +468,6 @@ void WindowMain::pBtStream(bool clicked)
     ui.pBtstartScreen->setEnabled(false);
     ui.pBtStream->setEnabled(false);
     ui.pBtStream->setText("加载中。。。");
-    QApplication::processEvents();
     const auto platform = static_cast<LivePlatform>(ui.comboBox->currentIndex());
     const QString roomIdText = ui.lineEditLiveId->currentText().trimmed();
     if (clicked && !roomIdText.isEmpty())
@@ -462,15 +476,27 @@ void WindowMain::pBtStream(bool clicked)
     }
     const std::string roomId = roomIdText.toStdString();
 
-    QThreadPool::globalInstance()->start([&, clicked, platform, roomId]() {
+    const int selectedRow = countA;
+    nlohmann::json account;
+    if (!RunScannerTask("stream: account snapshot", [&] {
+        if (clicked && selectedRow >= 0) account = userinfo.at("account").at(selectedRow);
+    }, [this] { Q_EMIT BackgroundError(); })) return;
+    backgroundTasks.start(MakeScannerTask("stream: startup", [this, clicked, platform, roomId, selectedRow, account = std::move(account)]() {
+        WriteScannerLog("stream: startup begin");
         if (!clicked)
         {
             emit StopScanner();
             return;
         }
-        if (countA == -1)
+        if (selectedRow == -1)
         {
             emit AccountNotSelected();
+            return;
+        }
+        if (account.at("type") != "官服")
+        {
+            WriteScannerLog("stream: unsupported account type; startup rejected");
+            emit AccountUnsupported();
             return;
         }
         std::string stream_link;
@@ -487,39 +513,26 @@ void WindowMain::pBtStream(bool clicked)
             t2.wait();
             t2.setUrl(stream_link, heards);
         }
-        if (const std::string& type = userinfo["account"][countA]["type"]; type == "官服")
         {
-            std::string stoken = userinfo["account"][countA]["access_key"];
-            std::string uid = userinfo["account"][countA]["uid"];
-            std::string mid = userinfo["account"][countA]["mid"];
+            std::string stoken = account.at("access_key");
+            std::string uid = account.at("uid");
+            std::string mid = account.at("mid");
             if (!CheckStokenValid(stoken, mid))
             {
                 emit AccountError();
                 return;
             }
-            t2.setServerType(ServerType::Official);
             t2.setLoginInfo1(uid, stoken, mid);
         }
-        else if (type == "崩坏3B服")
-        {
-            std::string stoken{ userinfo["account"][countA]["access_key"] };
-            std::string uid{ userinfo["account"][countA]["uid"] };
-            //可用性检查
-            auto result{ BSGameSDK::BH3::GetUserInfo(uid, stoken) };
-            if (result.code != 0)
-            {
-                emit AccountError();
-                return;
-            }
-            t2.setServerType(ServerType::BH3_BiliBili);
-            t2.setLoginInfo(uid, stoken, result.uname);
-        }
+        if (closing.load()) return;
         t2.start();
-    });
+    }, [this] { Q_EMIT BackgroundError(); }));
 }
 
 void WindowMain::closeEvent(QCloseEvent* event)
 {
+    closing.store(true);
+    backgroundTasks.clear();
     confirmationDelay.cancel();
     saveLiveRoomId(ui.lineEditLiveId->currentText());
     t1.stop();
@@ -590,9 +603,6 @@ void WindowMain::loginConfirmTip(const GameType gameType, bool b)
     case GameType::Honkai3:
         info += "\n登录崩坏3\n";
         break;
-    case GameType::Honkai3_BiliBili:
-        info += "\n登录BiliBili崩坏3\n";
-        break;
     case GameType::Genshin:
         info += "\n登录原神\n";
         break;
@@ -650,9 +660,9 @@ void WindowMain::scheduleConfirmation(bool screen)
                     t2.continueLastLogin();
                 }
             }
-            catch (const std::exception&)
+            catch (...)
             {
-                WriteScannerLog("confirmation: login request failed");
+                LogScannerException("confirmation: login request");
                 QMetaObject::invokeMethod(this, [this]() { islogin(ScanRet::FAILURE_2); }, Qt::QueuedConnection);
             }
         });
@@ -934,8 +944,9 @@ void WindowMain::configInitUpdate()
         refreshLiveRoomIds();
         startAccountSelfCheck();
     }
-    catch (const std::exception& e)
+    catch (...)
     {
+        LogScannerException("startup: configuration load");
         int result = QMessageBox::information(this, "错误", "配置文件错误！\n重置配置文件为空？", QMessageBox::Yes | QMessageBox::No);
         if (result == QMessageBox::Yes)
         {
@@ -964,14 +975,14 @@ void WindowMain::updateNote(QTableWidgetItem* item)
 void WindowMain::copyEntireRow(int row)
 {
     QString rowData;
+    if (userinfo["account"][row]["type"] != "官服")
+    {
+        QMessageBox::information(this, "提示", "该账号类型已停止支持，请选择官服账号。", QMessageBox::Yes);
+        return;
+    }
     std::string stoken = userinfo["account"][row]["access_key"];
     std::string stuid = userinfo["account"][row]["uid"];
     std::string mid = userinfo["account"][row]["mid"];
-    if (std::string type = userinfo["account"][row]["type"]; type == "崩坏3B服")
-    {
-        QMessageBox::information(this, "提示", "暂时不支持B服Cookie", QMessageBox::Yes);
-        return;
-    }
     rowData = QString::fromStdString(
         "stoken=" + stoken + "; " +
         "stuid=" + stuid + "; " +
@@ -980,15 +991,6 @@ void WindowMain::copyEntireRow(int row)
     clipboard->setText(rowData);
 }
 
-void OnlineUpdate::run()
-{
-    auto str = getOAString();
-}
-
-OnlineUpdate::~OnlineUpdate()
-{
-    wait();
-}
 
 void configInitLoad::run()
 {

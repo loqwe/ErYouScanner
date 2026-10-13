@@ -1,9 +1,14 @@
-## 获取Cookie(已失效)
+# 官服 Cookie 登录
 
-1. 打开你的浏览器,进入**无痕/隐身模式**
-2. 打开`http://user.mihoyo.com/`并进行登入操作
-3. 按下键盘上的`F12`
-4. 点击 Network
-5. 刷新页面，在Name里找到并点击user.mihoyo.com
-6. 在Headers里找到Request Headers点击展开并找到Cookie，全选Cookie并复制。
-7. Cookie 已经获取完毕了。
+推荐在 **账号管理 → 添加账号 → 扫码登录** 中添加账号。
+旧版 `user.mihoyo.com` 获取 Cookie 的说明已失效，不再作为使用步骤。
+
+若已持有自己的有效账号 Cookie，可在 **Cookie登录** 中填写，程序需要：
+
+- 账号标识：`stuid`、`ltuid` 或 `account_id`，任意一种。
+- `stoken`。
+- `mid`。
+
+字段使用标准 Cookie 格式，以分号分隔。账号有效性以启动自检和实际登录结果为准。
+v1.16.4 起仅支持官服账号，不能填写 B服 `access_key` 代替上述字段。
+请勿在 Issue、截图、日志附件或公开仓库中粘贴自己的 Cookie。

@@ -20,6 +20,8 @@
 #include "UtilString.hpp"
 #include "TimeStamp.hpp"
 #include "UrlQuery.hpp"
+#include "ScannerLog.hpp"
+#include "StokenResponse.hpp"
 
 static const std::string device_id{ CreateUUID::CreateUUID4() };
 static GameType loginType{ GameType::HonkaiStarRail };
@@ -69,15 +71,6 @@ inline cpr::Header GetRequestHeader()
         { "x-rpc-sdk_version", "2.16.0" }
     };
     return headers;
-}
-
-inline void WriteScannerLog(const std::string_view message)
-{
-    std::ofstream file{ "Config/scanner.log", std::ios::app };
-    if (file)
-    {
-        file << message << '\n';
-    }
 }
 
 inline std::tuple<int, std::string, std::string> GetLoginQrcodeUrl()
@@ -244,24 +237,25 @@ inline bool CheckStokenValid(const std::string_view stoken, const std::string_vi
         cpr::Url{ api::mhy::takumi::cookie_account_info },
         cpr::Header{
             { "Accept", "application/json" },
-            { "Cookie", cookie } });
+            { "Cookie", cookie } },
+        cpr::Timeout{10000});
 
     if (response.error || response.status_code != 200 || response.text.empty())
     {
-        WriteScannerLog("check stoken: http=" + std::to_string(response.status_code));
+        WriteScannerLog("check stoken: http=" + std::to_string(response.status_code) +
+            " network_error=" + std::to_string(static_cast<int>(response.error.code)));
         return false;
     }
 
-    const auto j = nlohmann::json::parse(response.text, nullptr, false);
-    if (j.is_discarded())
+    const auto retcode = ParseStokenRetcode(response.text);
+    if (!retcode)
     {
-        WriteScannerLog("check stoken: invalid json");
+        WriteScannerLog("check stoken: invalid JSON or retcode type");
         return false;
     }
 
-    const int retcode = j.value("retcode", -1);
-    WriteScannerLog("check stoken: retcode=" + std::to_string(retcode));
-    return retcode == 0;
+    WriteScannerLog("check stoken: retcode=" + std::to_string(*retcode));
+    return *retcode == 0;
 }
 
 inline std::string PandaScanQRCode(
@@ -385,7 +379,6 @@ inline bool PassportQRCodeLogin(
                     " message=" + j.value("message", std::string{}));
     return retcode == 0;
 }
-
 inline bool ScanPassportQRLogin(
     const std::string_view qrCode,
     const std::string_view stoken,
@@ -547,140 +540,4 @@ inline bool ConfirmQRLogin(const std::string_view url, const std::string_view ui
                     " retcode=" + std::to_string(retcode) +
                     " message=" + j.value("message", std::string{}));
     return retcode == 0;
-}
-
-inline std::string makeSign(const nlohmann::json& data)
-{
-    std::string param;
-    for (auto& [key, value] : data.items())
-    {
-        if (key == "sign")
-            continue;
-        const std::string strVal = value.is_string() ? value.get<std::string>() : value.dump();
-
-        param += key + "=" + strVal + "&";
-    }
-    if (!param.empty())
-        param.pop_back();
-#ifdef _DEBUG
-    std::cout << "make_param = " << param << std::endl;
-#endif
-    constexpr std::string_view key = "0ebc517adb1b62c6b408df153331f9aa";
-    return HmacSha256(param, std::string(key));
-}
-
-inline std::string& getOAString()
-{
-    static std::string value = []() {
-        const auto response = cpr::Get(cpr::Url{ "https://api.v6qbb.cloud/get_bh3_bilibili_oa" });
-        if (response.text.empty())
-            throw std::runtime_error("");
-        return response.text;
-    }();
-    return value;
-}
-
-inline std::tuple<int, std::string, std::string, std::string> GetBH3ExternalLoginInfo(const std::string& uid, const std::string& access_key)
-{
-    const std::string bodyData = std::format(R"({{"access_key":"{}","uid":{}}})", access_key, uid);
-
-    nlohmann::json body{
-        { "device", "0000000000000000" },
-        { "app_id", 1 },
-        { "channel_id", 14 },
-        { "data", bodyData }
-    };
-    body["sign"] = makeSign(body);
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::bh3::v2_login },
-        cpr::Header{ { "Content-Type", "application/json" } },
-        cpr::Body{ body.dump() });
-
-    const auto j = nlohmann::json::parse(response.text);
-    const int retcode = j.value("retcode", -1);
-
-#ifdef _DEBUG
-    std::cout << "崩坏3验证完成 : " << response.text << std::endl;
-#endif
-
-    if (retcode != 0)
-    {
-        return { retcode, {}, {}, {} };
-    }
-
-    return { 0,
-             j["data"]["open_id"].get<std::string>(),
-             j["data"]["combo_token"].get<std::string>(),
-             j["data"]["combo_id"].get<std::string>() };
-}
-
-inline ScanRet scanCheck(const std::string& ticket)
-{
-    const std::string body = nlohmann::json{
-        { "app_id", "1" },
-        { "device", "0000000000000000" },
-        { "ticket", ticket },
-        { "ts", GetUnixTimeStampSeconds() }
-    }.dump();
-
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::bh3::qrcode_scan },
-        cpr::Body{ body },
-        cpr::Header{ { "Content-Type", "application/json" } });
-
-    const auto j = nlohmann::json::parse(response.text);
-    return j.value("retcode", -1) == 0 ? ScanRet::SUCCESS : ScanRet::FAILURE_1;
-}
-
-inline ScanRet scanConfirm(const std::string& ticket, const std::string& uid, const std::string& access_key, const std::string& name)
-{
-    auto [code, open_id, combo_token, combo_id] = GetBH3ExternalLoginInfo(uid, access_key);
-    if (code != 0)
-        return ScanRet::FAILURE_2;
-
-    const auto raw =
-        nlohmann::json{
-            { "heartbeat", false },
-            { "open_id", open_id },
-            { "device_id", "0000000000000000" },
-            { "app_id", "1" },
-            { "channel_id", "14" },
-            { "combo_token", combo_token },
-            { "asterisk_name", name },
-            { "combo_id", combo_id },
-            { "account_type", "2" }
-        };
-
-    const auto ext =
-        nlohmann::json{
-            { "data", nlohmann::json{
-                          { "accountType", "2" },
-                          { "accountID", "" },
-                          { "c", open_id },
-                          { "accountToken", combo_token },
-                          { "dispatch", getOAString() } } }
-        };
-
-    const nlohmann::json postBody{
-        { "device", "0000000000000000" },
-        { "app_id", 1 },
-        { "ts", GetUnixTimeStampSeconds() },
-        { "ticket", ticket },
-        { "payload", nlohmann::json{
-                         { "proto", "Combo" },
-                         { "raw", raw.dump() },
-                         { "ext", ext.dump() } } }
-    };
-
-#ifdef _DEBUG
-    std::cout << postBody.dump() << std::endl;
-#endif
-
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::bh3::qrcode_confirm },
-        cpr::Header{ { "Content-Type", "application/json" } },
-        cpr::Body{ postBody.dump() });
-
-    const auto j = nlohmann::json::parse(response.text);
-    return j.value("retcode", -1) == 0 ? ScanRet::SUCCESS : ScanRet::FAILURE_2;
 }

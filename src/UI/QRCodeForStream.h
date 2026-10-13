@@ -35,10 +35,7 @@ public:
     ~QRCodeForStream();
     Q_DISABLE_COPY_MOVE(QRCodeForStream)
 
-    void setLoginInfo(const std::string_view uid, const std::string_view gameToken);
-    void setLoginInfo(const std::string_view uid, const std::string_view gameToken, const std::string& name);
     void setLoginInfo1(const std::string_view uid, const std::string_view stoken, const std::string_view mid);
-    void setServerType(const ServerType servertype);
     void setUrl(const std::string& url, const std::map<std::string, std::string> heard = {});
     auto init() -> bool;
     void run();
@@ -53,16 +50,13 @@ Q_SIGNALS:
 private:
     std::mutex mtx;
     void LoginOfficial();
-    void LoginBH3BiliBili();
     void setStreamHW();
     bool convertFrame(cv::Mat& img);
     void scanFrame(const cv::Mat& img);
     void submitFrame(cv::Mat img);
     static int interruptStream(void* opaque);
     std::string streamUrl{};
-    std::string m_name;
     ConfigDate* m_config;
-    ServerType servertype;
     ScanRet ret = ScanRet::UNKNOW;
     AVDictionary* pAvdictionary;
     AVFormatContext* pAVFormatContext;

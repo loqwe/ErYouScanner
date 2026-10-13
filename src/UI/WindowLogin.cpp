@@ -9,7 +9,6 @@
 #include <QThread>
 
 #include "MhyApi.hpp"
-#include "BSGameSDK.hpp"
 #include "UtilMat.hpp"
 #include "CookieParser.hpp"
 #include "UrlQuery.hpp"
@@ -35,7 +34,6 @@ WindowLogin::WindowLogin(QWidget* parent) :
     InitTabs0();
     InitTabs1();
     InitTabs2();
-    InitTabs3();
     MainHLayout = new QHBoxLayout(this);
     MainHLayout->setContentsMargins(0, 0, 0, 0);
     MainHLayout->addWidget(tabWidget);
@@ -193,51 +191,6 @@ void WindowLogin::InitTabs2()
     Tab2MainVLayout->addLayout(Tab2ButtonHLayout);
 }
 
-void WindowLogin::InitTabs3()
-{
-    Tab3MainVLayout = new QVBoxLayout(tabs[3]);
-    Tab3MainVLayout->setStretch(0, 3);
-    Tab3MainVLayout->setStretch(2, 2);
-
-    Tab3VLayout0 = new QVBoxLayout();
-    Tab3VLayout0->setSpacing(40);
-    Tab3VLayout0->setContentsMargins(50, 20, 50, -1);
-    lineEditAccount = new QLineEdit(tabs[3]);
-    lineEditAccount->setMaximumSize(QSize(400, 40));
-    lineEditAccount->setPlaceholderText("请输入账号...");
-    lineEditAccount->setClearButtonEnabled(true);
-    Tab3VLayout0->addWidget(lineEditAccount);
-    lineEditPwd = new QLineEdit(tabs[3]);
-    lineEditPwd->setMaximumSize(QSize(400, 40));
-    lineEditPwd->setPlaceholderText("请输入密码...");
-    lineEditPwd->setClearButtonEnabled(true);
-    lineEditPwd->setEchoMode(QLineEdit::Password);
-    Tab3VLayout0->addWidget(lineEditPwd);
-
-    Tab3MainVLayout->addLayout(Tab3VLayout0);
-
-    Tab3VLayout1 = new QVBoxLayout();
-    Tab3VLayout1->setContentsMargins(300, -1, -1, -1);
-    checkBoxShowPw = new QCheckBox(tabs[3]);
-    checkBoxShowPw->setText("显示密码");
-    Tab3VLayout1->addWidget(checkBoxShowPw);
-
-    Tab3MainVLayout->addLayout(Tab3VLayout1);
-
-    Tab3HLayout2 = new QHBoxLayout();
-    Tab3HLayout2->setSpacing(40);
-    Tab3HLayout2->setContentsMargins(50, 30, 50, 125);
-    Tab3pBtConfirm = new QPushButton(tabs[3]);
-    Tab3pBtConfirm->setText("登录");
-    Tab3pBtConfirm->setMinimumSize(120, 35);
-    Tab3HLayout2->addWidget(Tab3pBtConfirm);
-    Tab3pBtCancel = new QPushButton(tabs[3]);
-    Tab3pBtCancel->setText("取消");
-    Tab3pBtCancel->setMinimumSize(120, 35);
-    Tab3HLayout2->addWidget(Tab3pBtCancel);
-
-    Tab3MainVLayout->addLayout(Tab3HLayout2);
-}
 
 void WindowLogin::Initconnect()
 {
@@ -288,10 +241,6 @@ void WindowLogin::Initconnect()
         {
             break;
         }
-        case 3:
-        {
-            break;
-        }
         default:
             __assume(0);
         }
@@ -310,19 +259,7 @@ void WindowLogin::Initconnect()
 
     connect(&m_WindowGeeTest, &WindowGeeTest::postMessage, this, [this](const QString& Message) {
         m_WindowGeeTest.close();
-        if (GeeTestInfo.GeeTestType == ServerType::BH3_BiliBili)
-        {
-            QThreadPool::globalInstance()->start([this, Message]() {
-                QJsonObject json{ QJsonDocument{ QJsonDocument::fromJson(Message.toUtf8()) }.object() };
-                auto result{ BSGameSDK::BH3::LoginByPassWord(
-                    lineEditAccount->text().toStdString(), lineEditPwd->text().toStdString(),
-                    GeeTestInfo.session_id,
-                    json.value("geetest_challenge").toString().toStdString(),
-                    json.value("geetest_validate").toString().toStdString()) };
-                ResultByLoginBH3BiLiBiLi(result);
-            });
-        }
-        else if (GeeTestInfo.GeeTestType == ServerType::Official)
+        if (GeeTestInfo.GeeTestType == ServerType::Official)
         {
             QThreadPool::globalInstance()->start([this, Message]() {
                 auto [code, data] = CreateLoginCaptcha(phoneNumberLineEdit->text().toStdString(),
@@ -396,13 +333,6 @@ void WindowLogin::Initconnect()
         });
     });
 
-    connect(Tab3pBtConfirm, &QPushButton::clicked, this, [this] {
-        QThreadPool::globalInstance()->start([this] {
-            auto result{ BSGameSDK::BH3::LoginByPassWord(lineEditAccount->text().toStdString(), lineEditPwd->text().toStdString()) };
-            ResultByLoginBH3BiLiBiLi(result);
-        });
-    });
-
     connect(pBtofficialLogin, &QPushButton::clicked, this, [this] {
         QThreadPool::globalInstance()->start([this] {
             std::string CookieString{ lineEditCookie->text().toStdString() };
@@ -460,18 +390,6 @@ void WindowLogin::Initconnect()
         }
     });
 
-    connect(checkBoxShowPw, &QCheckBox::checkStateChanged, this, [this](int state) {
-        if (state == Qt::Checked)
-        {
-            lineEditPwd->setEchoMode(QLineEdit::Normal);
-            lineEditPwd->setInputMethodHints(Qt::ImhHiddenText);
-        }
-        else if (state == Qt::Unchecked)
-        {
-            lineEditPwd->setEchoMode(QLineEdit::Password);
-        }
-    });
-
     connect(Tab0pbtCancel, &QPushButton::clicked, this, [this]() {
         phoneNumberLineEdit->clear();
         verifyCodeLineEdit->clear();
@@ -481,33 +399,8 @@ void WindowLogin::Initconnect()
         lineEditCookie->clear();
     });
 
-    connect(Tab3pBtCancel, &QPushButton::clicked, this, [this]() {
-        lineEditAccount->clear();
-        lineEditPwd->clear();
-    });
 }
 
-void WindowLogin::ResultByLoginBH3BiLiBiLi(const auto& result)
-{
-    if (result.code == 0)
-    {
-        emit AddUserInfo(result.uname, result.access_key, result.uid, "", "崩坏3B服");
-    }
-    else if (result.code == 200000)
-    {
-        GeeTestInfo = BSGameSDK::BH3::CaptchaCaptcha();
-        m_WindowGeeTest.Init(stringTowstring(GeeTestInfo.gt), stringTowstring(GeeTestInfo.challenge));
-        emit showWindowGeeTest(true);
-    }
-    else if (result.code == 500002)
-    {
-        emit showMessagebox("密码错误");
-    }
-    else if (result.code != 0)
-    {
-        emit showMessagebox(QString::fromStdString(result.message));
-    }
-}
 
 void WindowLogin::ResultByLoginOfficial(const auto& result)
 {

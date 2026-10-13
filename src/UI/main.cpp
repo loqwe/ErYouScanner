@@ -5,9 +5,10 @@
 
 #include <QMessageBox>
 #include <QStyleHints>
+#include <QDir>
+#include "ScannerCrash.hpp"
+#include "ScannerLog.hpp"
 #include <opencv2/core/utils/logger.hpp>
-
-static std::mutex mtx;
 
 static bool isOpen()
 {
@@ -15,44 +16,37 @@ static bool isOpen()
     return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-static long ExceptionFilter(_EXCEPTION_POINTERS* ExceptionInfo)
-{
-    std::lock_guard<std::mutex> lock(mtx);
-    WCHAR szFileName[MAX_PATH]{ 0 };
-    WCHAR szVersion[]{ TEXT("MHY_Scanner") };
-    SYSTEMTIME stLocalTime;
-    GetLocalTime(&stLocalTime);
-    wsprintfW(szFileName, L"%s-%04d%02d%02d-%02d%02d%02d.dmp",
-              szVersion, stLocalTime.wYear, stLocalTime.wMonth, stLocalTime.wDay,
-              stLocalTime.wHour, stLocalTime.wMinute, stLocalTime.wSecond);
-    HANDLE hFile{ CreateFileW(szFileName, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL) };
-    if (hFile != INVALID_HANDLE_VALUE)
-    {
-        MINIDUMP_EXCEPTION_INFORMATION ExInfo;
-        ExInfo.ThreadId = GetCurrentThreadId();
-        ExInfo.ExceptionPointers = ExceptionInfo;
-        ExInfo.ClientPointers = FALSE;
-        //写入 dmp 文件
-        BOOL bOK{ MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hFile, MiniDumpNormal, &ExInfo, NULL, NULL) };
-        CloseHandle(hFile);
-        LPCWSTR lpText = L"即将退出，已写入小型内存转储";
-        LPCWSTR lpCaption = L"意外崩溃！";
-        UINT uType = MB_OK | MB_ICONINFORMATION;
-        MessageBoxW(NULL, lpText, lpCaption, uType);
-    }
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-
 int main(int argc, char* argv[])
 {
     UINT utf8 = 65001;
     SetConsoleOutputCP(utf8);
-    SetUnhandledExceptionFilter(ExceptionFilter);
+    wchar_t executable[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable));
+    if (length && length < ARRAYSIZE(executable))
+    {
+        for (DWORD i = length; i > 0; --i)
+        {
+            if (executable[i - 1] == L'\\')
+            {
+                executable[i - 1] = L'\0';
+                SetCurrentDirectoryW(executable);
+                break;
+            }
+        }
+    }
+    InstallScannerCrashHandlers();
+    WriteScannerLog("startup: initializing application version=" MHY_Scanner_VERSION);
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
     QApplication a(argc, argv);
+    if (!QDir::setCurrent(QCoreApplication::applicationDirPath()))
+    {
+        QMessageBox::information(nullptr, "启动失败", "无法进入程序所在目录。", QMessageBox::Yes);
+        return 2;
+    }
     QApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
     if (isOpen())
     {
+        WriteScannerLog("startup: existing instance detected; activating its window");
         HWND hwnd = FindWindowW(NULL, L"MHY扫码器");
         if (hwnd == NULL)
         {
@@ -70,6 +64,14 @@ int main(int argc, char* argv[])
         return -1;
     }
     WindowMain w;
+    const HANDLE logCheck = CreateFileW(L"Config/scanner.log", FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (logCheck == INVALID_HANDLE_VALUE)
+        QMessageBox::information(&w, "日志无法写入", "程序目录没有写入权限，日志和配置无法保存。请将完整压缩包解压到可写目录。", QMessageBox::Yes);
+    else
+        CloseHandle(logCheck);
     w.show();
-    return a.exec();
+    const int result = a.exec();
+    WriteScannerLog("shutdown: event loop finished code=" + std::to_string(result));
+    return result;
 }

@@ -21,10 +21,7 @@ public:
     ~QRCodeForScreen();
     Q_DISABLE_COPY_MOVE(QRCodeForScreen)
 
-    void setLoginInfo(const std::string& uid, const std::string& token);
-    void setLoginInfo(const std::string& uid, const std::string& token, const std::string& name);
     void setLoginInfo1(const std::string& uid, const std::string& stoken, const std::string& mid);
-    void setServerType(const ServerType servertype);
     void continueLastLogin();
     void run();
     void stop();
@@ -36,12 +33,9 @@ signals:
 private:
     ConfigDate* m_config;
     void LoginOfficial();
-    void LoginBH3BiliBili();
-    void monitorScreen(bool official);
+    void monitorScreen();
     std::atomic<bool> m_stop;
-    std::string m_name;
     GameType m_gametype{ GameType::UNKNOW };
-    ServerType servertype{};
     ScanRet ret{ ScanRet::UNKNOW };
     const int threadNumber{ 1 };
 };

@@ -8,6 +8,7 @@
 #include <QThreadPool>
 
 #include "QRScanner.h"
+#include "ScannerTask.hpp"
 #include "ScreenShotDXGI.hpp"
 
 namespace
@@ -38,35 +39,19 @@ QRCodeForScreen::~QRCodeForScreen()
     wait();
 }
 
-void QRCodeForScreen::setLoginInfo(const std::string& uid, const std::string& token)
-{
-    this->uid = uid;
-    this->gameToken = token;
-}
-
-void QRCodeForScreen::setLoginInfo(const std::string& uid, const std::string& token, const std::string& name)
-{
-    setLoginInfo(uid, token);
-    m_name = name;
-}
-
 void QRCodeForScreen::setLoginInfo1(const std::string& uid, const std::string& stoken, const std::string& mid)
 {
-    setLoginInfo(uid, stoken);
+    this->uid = uid;
+    this->gameToken = stoken;
     this->mid = mid;
 }
 
 void QRCodeForScreen::LoginOfficial()
 {
-    monitorScreen(true);
+    monitorScreen();
 }
 
-void QRCodeForScreen::LoginBH3BiliBili()
-{
-    monitorScreen(false);
-}
-
-void QRCodeForScreen::monitorScreen(bool official)
+void QRCodeForScreen::monitorScreen()
 {
     // One worker owns decoder and login state; it is drained before either is destroyed.
     QRScanner scanner;
@@ -153,7 +138,7 @@ void QRCodeForScreen::monitorScreen(bool official)
             cv::imshow("Video_Stream", image);
             cv::waitKey(1);
 #endif
-            pool.tryStart([this, &scanner, official, image = std::move(image)]() {
+            pool.tryStart([this, &scanner, image = std::move(image)]() {
                 try
                 {
                     if (!m_stop.load() || isInterruptionRequested())
@@ -164,25 +149,16 @@ void QRCodeForScreen::monitorScreen(bool official)
                     scanner.decodeSingle(image, decoded);
                     std::string ticket;
                     if (!m_stop.load() || isInterruptionRequested() ||
-                        !parseOfficialQRCode(decoded, ticket) || (!official && gameType != GameType::Honkai3) ||
+                        !parseOfficialQRCode(decoded, ticket) ||
                         lastTicket == ticket)
                     {
                         return;
                     }
-                    bool accepted = false;
-                    if (official)
+                    const std::string passportQrUrl = PandaScanQRCode(scanUrl, ticket, gameType);
+                    const bool accepted = !passportQrUrl.empty();
+                    if (accepted)
                     {
-                        const std::string passportQrUrl = PandaScanQRCode(scanUrl, ticket, gameType);
-                        accepted = !passportQrUrl.empty();
-                        if (accepted)
-                        {
-                            lastQrCode = passportQrUrl;
-                        }
-                    }
-                    else
-                    {
-                        ret = scanCheck(ticket);
-                        accepted = ret == ScanRet::SUCCESS;
+                        lastQrCode = passportQrUrl;
                     }
                     if (!m_stop.load() || isInterruptionRequested())
                     {
@@ -193,7 +169,7 @@ void QRCodeForScreen::monitorScreen(bool official)
                         lastTicket = ticket;
                         // Stop capture before publishing a confirmation to the UI.
                         stop();
-                        Q_EMIT loginConfirm(official ? gameType : GameType::Honkai3_BiliBili, true);
+                        Q_EMIT loginConfirm(gameType, true);
                     }
                     else
                     {
@@ -203,7 +179,7 @@ void QRCodeForScreen::monitorScreen(bool official)
                 }
                 catch (...)
                 {
-                    WriteScannerLog("screen: QR worker failed");
+                    LogScannerException("screen: QR worker");
                     stop();
                     Q_EMIT loginResults(ScanRet::STREAMERROR);
                 }
@@ -221,22 +197,9 @@ void QRCodeForScreen::monitorScreen(bool official)
 
 void QRCodeForScreen::continueLastLogin()
 {
-    switch (servertype)
-    {
-    case ServerType::Official:
-    {
-        const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) &&
-                              ConfirmPassportQRLogin(lastQrCode, gameToken, mid);
-        Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2);
-        break;
-    }
-    case ServerType::BH3_BiliBili:
-        ret = scanConfirm(lastTicket, uid, gameToken, m_name);
-        Q_EMIT loginResults(ret);
-        break;
-    default:
-        break;
-    }
+    const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) &&
+                          ConfirmPassportQRLogin(lastQrCode, gameToken, mid);
+    Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2);
 }
 
 void QRCodeForScreen::run()
@@ -248,21 +211,11 @@ void QRCodeForScreen::run()
 #ifndef SHOW
         cv::namedWindow("Video_Stream", cv::WINDOW_AUTOSIZE);
 #endif
-        switch (servertype)
-        {
-        case ServerType::Official:
-            LoginOfficial();
-            break;
-        case ServerType::BH3_BiliBili:
-            LoginBH3BiliBili();
-            break;
-        default:
-            break;
-        }
+        LoginOfficial();
     }
     catch (...)
     {
-        WriteScannerLog("screen: model or capture initialization failed");
+        LogScannerException("screen: model or capture initialization");
         Q_EMIT loginResults(ScanRet::STREAMERROR);
     }
     m_stop.store(false);
@@ -273,7 +226,7 @@ void QRCodeForScreen::run()
     }
     catch (...)
     {
-        WriteScannerLog("screen: preview cleanup failed");
+        LogScannerException("screen: preview cleanup");
     }
 #endif
 }
@@ -282,9 +235,4 @@ void QRCodeForScreen::stop()
 {
     requestInterruption();
     m_stop.store(false);
-}
-
-void QRCodeForScreen::setServerType(const ServerType servertype)
-{
-    this->servertype = servertype;
 }

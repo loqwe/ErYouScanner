@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.26)
+project(task_boundary_regression LANGUAGES CXX)
+find_package(Qt6 REQUIRED COMPONENTS Core)
+add_executable(test_task_boundary test_task_boundary.cpp)
+target_compile_features(test_task_boundary PRIVATE cxx_std_20)
+target_include_directories(test_task_boundary PRIVATE ../../src/Core
+    ../../build/app/_deps/nlohmann_json-src/include)
+target_compile_options(test_task_boundary PRIVATE /W4 /WX /EHsc /utf-8)
+target_link_libraries(test_task_boundary PRIVATE Qt6::Core)
+add_custom_command(TARGET test_task_boundary POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE_DIR:test_task_boundary>")
+enable_testing()
+add_test(NAME task_boundary_regression COMMAND test_task_boundary)
+add_executable(test_crash_log test_crash_log.cpp)
+target_compile_features(test_crash_log PRIVATE cxx_std_20)
+target_include_directories(test_crash_log PRIVATE ../../src/Core)
+target_compile_definitions(test_crash_log PRIVATE MHY_Scanner_VERSION="1.16.4")
+target_compile_options(test_crash_log PRIVATE /W4 /WX /EHsc /utf-8)
+target_link_libraries(test_crash_log PRIVATE Qt6::Core Dbghelp)
+add_custom_command(TARGET test_crash_log POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Qt6::Core>" "$<TARGET_FILE_DIR:test_crash_log>")
+add_test(NAME crash_log_regression COMMAND test_crash_log)
+set_tests_properties(crash_log_regression PROPERTIES TIMEOUT 25)

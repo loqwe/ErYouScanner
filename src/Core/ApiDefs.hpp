@@ -7,8 +7,7 @@
 enum class ServerType : uint8_t
 {
     UNKNOW [[deprecated]] = 0,
-    Official = 1,
-    BH3_BiliBili = 2
+    Official = 1
 };
 
 enum class GameType
@@ -24,8 +23,7 @@ enum class GameType
     _3NNN = 10,
     PJSH = 11,
     ZenlessZoneZero = 12,
-    HYG = 13,
-    Honkai3_BiliBili = 10000
+    HYG = 13
 };
 
 enum class ScanRet
@@ -71,7 +69,6 @@ constexpr compile_string api_sdk{ "https://api-sdk.mihoyo.com" };
 namespace bh3
 {
 constexpr auto base = api_sdk + compile_string{ "/bh3_cn" };
-constexpr auto v2_login = base + compile_string{ "/combo/granter/login/v2/login" };
 constexpr auto qrcode_scan = base + compile_string{ "/combo/panda/qrcode/scan" };
 constexpr auto qrcode_confirm = base + compile_string{ "/combo/panda/qrcode/confirm" };
 
@@ -131,20 +128,6 @@ namespace mys
 {
 constexpr compile_string base{ "https://bbs-api.miyoushe.com" };
 constexpr auto userinfo = base + compile_string{ "/user/api/getUserFullInfo" };
-}
-
-}
-
-namespace api::game
-{
-
-namespace bili
-{
-constexpr compile_string base{ "https://line1-sdk-center-login-sh.biligame.net" };
-constexpr auto userinfo = base + compile_string{ "/api/client/user.info" };
-constexpr auto start_captcha = base + compile_string{ "/api/client/start_captcha" };
-constexpr auto login = base + compile_string{ "/api/client/login" };
-constexpr auto rsa = base + compile_string{ "/api/client/rsa" };
 }
 
 }

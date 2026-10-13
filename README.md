@@ -2,7 +2,7 @@
 
 MHY_Scanner2 是基于 [DSVVA/MHY_Scanner](https://github.com/DSVVA/MHY_Scanner) 二次修改的米哈游扫码工具。
 
-当前版本：**v1.16.4**。从 [GitHub Releases](https://github.com/loqwe/MHY_Scanner2/releases) 下载 ZIP，完整解压后运行 `MHY_Scanner_v1.16.4.exe`。近期变更见 [更新日志](CHANGELOG.md)。
+有问题请加作者QQ:1654458136  注明来意
 
 本项目为免费开源项目，仅用于学习和研究，禁止商业化用途。请勿提交或公开自己的 Cookie、SToken、MID、UID 等账号敏感信息。
 

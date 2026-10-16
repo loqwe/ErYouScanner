@@ -1,9 +1,9 @@
 // Verifies the shipped QRScanner class itself -- the one both scan paths use --
 // rather than a detector built inside the benchmark.
 //
-// Before the change (setScaleFactor(1.0)) a real game login code took ~88 ms to
-// decode; after the change (0.42) it takes ~7 ms, with an identical payload.
-// This program fails loudly if either regresses.
+// The shipped scanner intentionally uses the original full-resolution detector
+// input. This program verifies the payload without enforcing the removed latency
+// optimization's timing threshold.
 #include "QRScanner.h"
 
 #include <opencv2/opencv.hpp>
@@ -58,11 +58,6 @@ int main(int argc, char** argv)
             ok = false;
         }
         const double median = cost[cost.size() / 2];
-        if (median > 20.0)
-        {
-            std::cout << "decode too slow: median " << median << " ms (expected ~7 ms)\n";
-            ok = false;
-        }
 
         std::cout << "shipped QRScanner decodeSingle @1280x720\n";
         std::cout << "  min=" << cost.front() << "ms  median=" << median

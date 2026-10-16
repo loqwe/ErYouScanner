@@ -1,6 +1,6 @@
 # 本地构建与打包
 
-当前发行版本 **v2.00**，产品名 **二游扫码**，CMake target 为 `ErYouScanner`。源码目录已迁移为 `D:/崩铁脚本/二游扫码/source`。旧版验证记录保留在 `FIX_v1.16.*.md` 等历史文档中。
+当前发行版本 **v2.01**，产品名 **二游扫码**，CMake target 为 `ErYouScanner`。源码目录已迁移为 `D:/崩铁脚本/二游扫码/source`。旧版验证记录保留在 `FIX_v1.16.*.md` 等历史文档中。
 
 ## 依赖
 
@@ -12,7 +12,7 @@
 
 现有开发依赖继续放在 `D:/mhy-build-deps`，不随产品改名迁移。默认 Qt 路径是 `D:/mhy-build-deps/qt/6.8.0/msvc2022_64`。脚本优先使用 `source/.deps/ffmpeg`，也支持显式指定已有 FFmpeg SDK，不自动选择新的 `latest` 替换本地依赖。JSON 依赖默认使用 `source/.deps/nlohmann_json`，存在时通过 FetchContent 源码覆盖参数使用；可用 `-JsonSourceRoot` 指定其他源码目录，避免依赖旧 build 中的缓存。
 
-旧 CMake 缓存含原目录的绝对路径，不能把旧 build 文件夹搬过来直接增量编译。新版本统一配置到同级 `../build/v2.00`。
+旧 CMake 缓存含原目录的绝对路径，不能把旧 build 文件夹搬过来直接增量编译。新版本统一配置到同级 `../build/v2.01`。
 
 ## 一条命令构建并打包
 
@@ -39,13 +39,13 @@
 输出位置：
 
 ```text
-../build/v2.00/                         编译目录
-../build/staging-v2.00-<id>/             当次干净打包目录
-../releases/v2.00/
-  二游扫码_v2.00_win64.zip
+../build/v2.01/                         编译目录
+../build/staging-v2.01-<id>/             当次干净打包目录
+../releases/v2.01/
+  二游扫码_v2.01_win64.zip
   SHA256SUMS.txt
-../symbols/v2.00/<build-id>/
-  二游扫码_v2.00.pdb
+../symbols/v2.01/<build-id>/
+  二游扫码_v2.01.pdb
   build-info.json
   release-info.json
 ```
@@ -59,7 +59,7 @@ ZIP 内有一个完整运行目录、版本化 EXE、依赖、模型、许可、
 脚本等价于以下流程；工具链、Qt 和 FFmpeg 目录按实际环境填写：
 
 ```powershell
-cmake --fresh -S . -B ../build/v2.00 -G 'Visual Studio 17 2022' -A x64 `
+cmake --fresh -S . -B ../build/v2.01 -G 'Visual Studio 17 2022' -A x64 `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_TOOLCHAIN_FILE=D:/mhy-build-deps/vcpkg/scripts/buildsystems/vcpkg.cmake `
   -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
@@ -68,9 +68,9 @@ cmake --fresh -S . -B ../build/v2.00 -G 'Visual Studio 17 2022' -A x64 `
   -DCMAKE_PREFIX_PATH=D:/mhy-build-deps/qt/6.8.0/msvc2022_64 `
   -DQT6_INSTALL_PREFIX=D:/mhy-build-deps/qt/6.8.0/msvc2022_64 `
   -DFFMPEG_DIR=D:/mhy-build-deps/ffmpeg -DUNIT_TESTS=OFF -DDEV=OFF
-cmake --build ../build/v2.00 --config Release --parallel 4
-cmake --install ../build/v2.00 --config Release --component Runtime --prefix ../build/manual-stage
-cmake --install ../build/v2.00 --config Release --component Symbols --prefix ../build/manual-symbols
+cmake --build ../build/v2.01 --config Release --parallel 4
+cmake --install ../build/v2.01 --config Release --component Runtime --prefix ../build/manual-stage
+cmake --install ../build/v2.01 --config Release --component Symbols --prefix ../build/manual-symbols
 ```
 
 不指定 `FFMPEG_DIR` 时，底层 CMake 保留原先下载 FFmpeg 的行为；维护发行版时应明确指定已验证的 SDK。
@@ -78,9 +78,9 @@ cmake --install ../build/v2.00 --config Release --component Symbols --prefix ../
 ## 验证与发布
 
 离线与本机回归执行 `./tools/test.ps1`。实际应用界面测试可在主项目配置时增加
-`-DERYOU_UI_TESTS=ON`，构建 `test_app_ui` 后执行 `ctest --test-dir ../build/v2.00 -C Release --output-on-failure`。
+`-DERYOU_UI_TESTS=ON`，构建 `test_app_ui` 后执行 `ctest --test-dir ../build/v2.01 -C Release --output-on-failure`。
 该测试使用临时配置，不读取实际账号；WebView 检查只初始化官方窗口并取消，不提交登录。
-本次验证记录见 [FIX_v2.00.md](FIX_v2.00.md)。
+本次验证记录见 [FIX_v2.01.md](FIX_v2.01.md)。
 
 至少确认完整编译、对应的回归测试、无账号配置的启动和 ZIP 内容。真实账号、短信、官网验证及实际游戏登录需要单独验证，不得只因接口返回成功就宣称游戏已上线。
 

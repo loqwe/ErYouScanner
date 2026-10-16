@@ -2,7 +2,7 @@
 
 Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.com/DSVVA/MHY_Scanner) 持续开发，保留米哈游官服扫码功能，并接入库街区账号扫码。
 
-当前发行版本：**v2.00**。GitHub 仓库名同步为 **ErYouScanner**，发行包见 [GitHub Releases](https://github.com/loqwe/ErYouScanner/releases)。近期变化见 [更新日志](CHANGELOG.md)。
+当前发行版本：**v2.01**。GitHub 仓库名同步为 **ErYouScanner**，发行包见 [GitHub Releases](https://github.com/loqwe/ErYouScanner/releases)。近期变化见 [更新日志](CHANGELOG.md)。
 有问题请加作者QQ:1654458136  注明来意
 
 ## 功能
@@ -21,7 +21,7 @@ Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.
 
 ## 开始使用
 
-将 `二游扫码_v2.00_win64.zip` **完整解压**到可写目录，启动 `二游扫码_v2.00.exe`。一起保留 DLL、`plugins`、`ScanModel`；不要单独复制 EXE。运行需要 [Visual C++ x64 运行时库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
+将 `二游扫码_v2.01_win64.zip` **完整解压**到可写目录，启动 `二游扫码_v2.01.exe`。一起保留 DLL、`plugins`、`ScanModel`；不要单独复制 EXE。运行需要 [Visual C++ x64 运行时库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
 
 选择平台，打开 **账号管理 → 添加账号**：
 
@@ -43,7 +43,7 @@ Windows 账号凭据使用当前用户 DPAPI 加密保存；历史明文配置�
 
 日志位置：`Config/scanner.log`。反馈时提供程序版本、出错时间、操作步骤和相关日志末尾，不要提交 Token、Cookie、验证码或完整二维码。日志记录阶段、业务返回码和可用异常信息。
 
-日志达到 1MB 后滚动，保留当前文件和 3 个历史文件；本版修复与验证见 [v2.00 记录](FIX_v2.00.md)。日志会记录服务端返回的 `msg`（截断并去除控制字符），因此失败原因不必再从业务码猜。业务码 242 的含义已核实为**服务端限流**（服务端原话：发送短信频繁），按账号计，实测窗口超过 53 分钟，现场取证见 [242 抓包结论](DIAG_v2.0.7_242_live_probe.md)。收到 242 后软件会停止本次会话内的重试。
+日志达到 1MB 后滚动，保留当前文件和 3 个历史文件；本版修复与验证见 [v2.01 记录](FIX_v2.01.md)。日志会记录服务端返回的 `msg`（截断并去除控制字符），因此失败原因不必再从业务码猜。业务码 242 的含义已核实为**服务端限流**（服务端原话：发送短信频繁），按账号计，实测窗口超过 53 分钟，现场取证见 [242 抓包结论](DIAG_v2.0.7_242_live_probe.md)。收到 242 后软件会停止本次会话内的重试。
 
 可捕获的致命异常会尽量追加 `fatal:` 日志并生成转储；系统强杀、直接 fail-fast 或进入 `main` 之前的错误可能绕过处理器。转储可能含账号内存，请勿公开上传 `.dmp`。
 

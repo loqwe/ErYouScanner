@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.26)
 project(ErYouScanner
-	VERSION 2.00
+	VERSION 2.01
 	LANGUAGES CXX
 )
 set(ERYOU_DISPLAY_NAME "二游扫码")

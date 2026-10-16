@@ -2,7 +2,7 @@
 
 Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.com/DSVVA/MHY_Scanner) 持续开发，保留米哈游官服扫码功能，并接入库街区账号扫码。
 
-当前发行版本：**v2.01**。GitHub 仓库名同步为 **ErYouScanner**，发行包见 [GitHub Releases](https://github.com/loqwe/ErYouScanner/releases)。近期变化见 [更新日志](CHANGELOG.md)。
+当前发行版本：**v2.00**。GitHub 仓库名同步为 **ErYouScanner**，发行包见 [GitHub Releases](https://github.com/loqwe/ErYouScanner/releases)。近期变化见 [更新日志](CHANGELOG.md)。
 有问题请加作者QQ:1654458136  注明来意
 
 ## 功能

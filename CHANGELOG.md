@@ -22,8 +22,8 @@
 - 新增离线基准与验证程序（`source/tests/scan_latency/`）：`bench_scan_latency`
   对比缩放因子与 ROI 方案，`bench_scale_floor` 测尺寸下限，
   `verify_shipped_scanner` 对应用本体的 `QRScanner` 做码文与耗时的回归断言。
-- 完整取证与实测数据见 [扫码延迟取证](DIAG_scan_latency.md)，
-  版本记录见 [FIX_v2.00.md](FIX_v2.00.md)。
+- 完整取证与实测数据见 [扫码延迟取证](doc/DIAG_scan_latency.md)，
+  版本记录见 [FIX_v2.00.md](doc/FIX_v2.00.md)。
 - 清理历史遗留缺陷（均零行为变更）：
   - 扫描预览窗口的编译开关语义是反的——`CMakeLists.txt` 在**非 DEV** 构建里定义 `SHOW`，
     而代码用 `#ifndef SHOW` 包住预览，读起来与行为相反。改为正向的

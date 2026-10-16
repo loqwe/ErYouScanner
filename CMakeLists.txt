@@ -207,8 +207,8 @@ install(
 	. COMPONENT Runtime
 )
 
-install(FILES RELEASE_README.md LICENSE DESTINATION . COMPONENT Runtime)
-install(FILES THIRD_PARTY.md DESTINATION . COMPONENT Runtime)
+install(FILES doc/RELEASE_README.md LICENSE DESTINATION . COMPONENT Runtime)
+install(FILES doc/THIRD_PARTY.md DESTINATION . COMPONENT Runtime)
 install(DIRECTORY licenses DESTINATION . COMPONENT Runtime)
 
 option(ERYOU_UI_TESTS "Build isolated application UI regression" OFF)

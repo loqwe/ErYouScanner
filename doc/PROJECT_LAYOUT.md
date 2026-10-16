@@ -4,7 +4,7 @@
 
 ```text
 二游扫码/
-  source/                 唯一 Git 源码，包含 docs、tools 和测试
+  source/                 唯一 Git 源码，包含 doc、tools 和测试
   app/                    日常运行的当前完整环境，Config 跟随此处 EXE
   releases/v<版本>/       只放对外 ZIP、校验值和对应发行记录
   symbols/v<版本>/<构建编号>/  PDB 及对应 EXE、ZIP 哈希清单
@@ -25,8 +25,8 @@
 
 ## Git 与迁移
 
-`source/.git` 是唯一仓库。迁移保留未提交的 v2.0.0 改动与历史；备份不代替正常提交。GitHub 仓库地址暂保留 `loqwe/MHY_Scanner2`，本地名称变更不自动重命名远程仓库。
+`source/.git` 是唯一仓库。迁移保留未提交的 v2.0.0 改动与历史；备份不代替正常提交。GitHub 仓库为 `loqwe/ErYouScanner`。
 
 实际迁移以迁移清单为准，先记录来源、目标及必要校验值，再移动；日志和账号备份不进入 Git。恢复旧版时应从完整旧发行包建立独立运行目录，并明确使用哪个配置备份。
 
-v2.0.0 保留为历史开发构建。v2.0.1 及以后通过 `source/tools/package.ps1` 生成发行包，具体参数见 [BUILD_LOCAL.md](../BUILD_LOCAL.md)。
+v2.0.0 保留为历史开发构建。v2.0.1 及以后通过 `source/tools/package.ps1` 生成发行包，具体参数见 [BUILD_LOCAL.md](BUILD_LOCAL.md)。

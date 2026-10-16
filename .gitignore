@@ -373,3 +373,11 @@ install/
 /3rdparty/libcurl-vc17-X64-release-static-zlib-static-ipv6-sspi-schannel
 /3rdparty/abogus_cpp
 /CMakePresets.json
+/app/
+/symbols/
+/diagnostics/
+/archive/
+/install-ui/
+*.dmp
+*.zip
+*.exe

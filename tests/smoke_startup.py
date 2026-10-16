@@ -3,11 +3,21 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
+
+
+def expected_version():
+    """Read the version from CMakeLists.txt so this cannot go stale on a bump."""
+    cmake = (pathlib.Path(__file__).resolve().parents[1] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
+    match = re.search(r"project\(ErYouScanner\s+VERSION\s+(\d+\.\d+(?:\.\d+)?)", cmake)
+    if not match:
+        raise RuntimeError("Cannot read the application version from CMakeLists.txt")
+    return match.group(1)
 
 
 class FailingProxy(http.server.BaseHTTPRequestHandler):
@@ -65,7 +75,7 @@ def run(package, root, executable):
                     if process.poll() is not None:
                         raise RuntimeError(f"{name}: application exited with {process.returncode}")
                     log = (config / "scanner.log").read_text(encoding="utf-8")
-                    required = ["startup: initializing application version=1.16.4"]
+                    required = [f"startup: initializing application version={expected_version()}"]
                     if accounts:
                         required += ["account-check: row=1 begin", "account-check: row=1 complete"]
                         required += ["check stoken: http="] if expected_requests else ["unsupported account type; skipped"]

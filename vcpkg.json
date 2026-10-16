@@ -1,6 +1,6 @@
 {
-	"name": "mhy-scanner",
-	"version": "1.1.15",
+	"name": "eryou-scanner",
+	"version": "2.0.0",
 	"builtin-baseline": "57987637aac17d62bac535bc839baca3754490e6",
 	"dependencies": [
 		{

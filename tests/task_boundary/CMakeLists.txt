@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.26)
 project(task_boundary_regression LANGUAGES CXX)
 find_package(Qt6 REQUIRED COMPONENTS Core)
+find_path(JSON_INCLUDE_DIR nlohmann/json.hpp REQUIRED)
 add_executable(test_task_boundary test_task_boundary.cpp)
 target_compile_features(test_task_boundary PRIVATE cxx_std_20)
 target_include_directories(test_task_boundary PRIVATE ../../src/Core
-    ../../build/app/_deps/nlohmann_json-src/include)
+    "${JSON_INCLUDE_DIR}")
 target_compile_options(test_task_boundary PRIVATE /W4 /WX /EHsc /utf-8)
 target_link_libraries(test_task_boundary PRIVATE Qt6::Core)
 add_custom_command(TARGET test_task_boundary POST_BUILD
@@ -14,7 +15,7 @@ add_test(NAME task_boundary_regression COMMAND test_task_boundary)
 add_executable(test_crash_log test_crash_log.cpp)
 target_compile_features(test_crash_log PRIVATE cxx_std_20)
 target_include_directories(test_crash_log PRIVATE ../../src/Core)
-target_compile_definitions(test_crash_log PRIVATE MHY_Scanner_VERSION="1.16.4")
+target_compile_definitions(test_crash_log PRIVATE MHY_Scanner_VERSION="2.0.1")
 target_compile_options(test_crash_log PRIVATE /W4 /WX /EHsc /utf-8)
 target_link_libraries(test_crash_log PRIVATE Qt6::Core Dbghelp)
 add_custom_command(TARGET test_crash_log POST_BUILD

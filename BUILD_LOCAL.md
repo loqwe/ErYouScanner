@@ -1,36 +1,65 @@
-# Local Windows Build
+# 本地构建与打包
 
-Current local build: **v1.16.4** (official accounts only, by owner request).
-See FIX_v1.16.4.md for B-server removal, worker exception protection,
-fatal logging, verification and checksums. Distribute only
-../MHY_Scanner_v1.16.4.zip; its entry point is MHY_Scanner_v1.16.4.exe.
-The matching installed runtime/PDB is in install-ui/MHY_Scanner_1.16.4.
-No account configuration, logs or crash dumps are packaged. GitHub releases
-should carry the ZIP only, as requested by the repository owner.
-The earlier v1.16.2/v1.16.3 artifacts and verification records are preserved.
-The earlier local v1.16.4 test package/runtime are backed up separately with
-the suffix before_bili_removal. Build the final ZIP from
-build/package-v1.16.4-official-only; see CHANGELOG.md for user-facing changes.
+当前发行版本 **v2.00**，产品名 **二游扫码**，CMake target 为 `ErYouScanner`。源码目录已迁移为 `D:/崩铁脚本/二游扫码/source`。旧版验证记录保留在 `FIX_v1.16.*.md` 等历史文档中。
 
-Toolchain: MSVC 19.44.35227, Windows SDK 10.0.26100.0, x64 Release, C++23, /MD.
-Qt: 6.8.0 win64_msvc2022_64 (the existing CI version).
-vcpkg baseline: 57987637aac17d62bac535bc839baca3754490e6.
-Dependencies: x64-windows-static-md, as in the existing Windows build workflow.
+## 依赖
 
-Local dependencies were installed in D:/mhy-build-deps to avoid non-ASCII SDK
-relocation issues and the limited free space on C:. These are development files,
-not account data. The application source remains in repair-source.
+- Visual Studio 2022 / Build Tools，x64 C++ 工具集和 Windows SDK。
+- CMake 3.26 以上，C++23，Release，动态 MSVC 运行库 `/MD`。
+- Qt 6.8.0，`msvc2022_64`，Widgets 与 Concurrent。
+- vcpkg `x64-windows-static-md`；版本基线见 `vcpkg.json`。
+- 同一套 FFmpeg shared SDK 的头文件、导入库和 DLL。
 
-The Qt installer initially failed to relocate qmake under the Chinese workspace
-path. Installation to D:/mhy-build-deps/qt completed successfully; no application
-source or UI theme was changed to work around this installer issue.
+现有开发依赖继续放在 `D:/mhy-build-deps`，不随产品改名迁移。默认 Qt 路径是 `D:/mhy-build-deps/qt/6.8.0/msvc2022_64`。脚本优先使用 `source/.deps/ffmpeg`，也支持显式指定已有 FFmpeg SDK，不自动选择新的 `latest` 替换本地依赖。JSON 依赖默认使用 `source/.deps/nlohmann_json`，存在时通过 FetchContent 源码覆盖参数使用；可用 `-JsonSourceRoot` 指定其他源码目录，避免依赖旧 build 中的缓存。
 
-After dependency installation, use a clean build directory when supplying the
-vcpkg toolchain. Do not reuse the earlier build/app cache without a toolchain.
+旧 CMake 缓存含原目录的绝对路径，不能把旧 build 文件夹搬过来直接增量编译。新版本统一配置到同级 `../build/v2.00`。
+
+## 一条命令构建并打包
+
+在源码目录执行；脚本兼容 Windows PowerShell 5.1 与 PowerShell 7：
 
 ```powershell
-$cmake = "D:/mhy-build-deps/vcpkg/downloads/tools/cmake-3.31.10-windows/cmake-3.31.10-windows-x86_64/bin/cmake.exe"
-& $cmake -S . -B build/app-release -A x64 `
+./tools/package.ps1
+```
+
+默认 SDK 尚未归位时，`-FfmpegRoot` 必须指向实际存在、包含 `bin/lib/include` 的 SDK。也可以指定依赖和工具路径：
+
+```powershell
+./tools/package.ps1 `
+  -DependencyRoot 'D:/mhy-build-deps' `
+  -QtRoot 'D:/mhy-build-deps/qt/6.8.0/msvc2022_64' `
+  -FfmpegRoot 'D:/path/to/ffmpeg-shared-sdk' `
+  -JsonSourceRoot 'D:/path/to/nlohmann_json' `
+  -CMakePath 'C:/path/to/cmake.exe' `
+  -Parallel 4
+```
+
+脚本每次重新生成 CMake 缓存，编译后安装 Runtime 和 Symbols 两个组件，并创建全新的 staging 目录。已有同版本 ZIP 时默认停止；确实需要替换当前开发包时显式增加 `-ReplacePackage`。对外重新发布修改后的程序应使用新版本号。
+
+输出位置：
+
+```text
+../build/v2.00/                         编译目录
+../build/staging-v2.00-<id>/             当次干净打包目录
+../releases/v2.00/
+  二游扫码_v2.00_win64.zip
+  SHA256SUMS.txt
+../symbols/v2.00/<build-id>/
+  二游扫码_v2.00.pdb
+  build-info.json
+  release-info.json
+```
+
+ZIP 内有一个完整运行目录、版本化 EXE、依赖、模型、许可、使用说明和 `build-info.json`。清单包含唯一符号构建编号、EXE/PDB 哈希、源码提交、是否有未提交改动、运行文件哈希及构建时间，可用于找到精确对应的 PDB。PDB 先暂存在当次 staging，ZIP 压缩成功后归档到唯一 build-id 目录，不覆盖同版本旧符号；符号旁的 `release-info.json` 额外记录最终 ZIP 哈希。源码提交值本身不能代替保存未提交源码。
+
+脚本不会运行程序、替换 `app`、提交、推送或发布 GitHub Release。
+
+## 直接使用 CMake
+
+脚本等价于以下流程；工具链、Qt 和 FFmpeg 目录按实际环境填写：
+
+```powershell
+cmake --fresh -S . -B ../build/v2.00 -G 'Visual Studio 17 2022' -A x64 `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_TOOLCHAIN_FILE=D:/mhy-build-deps/vcpkg/scripts/buildsystems/vcpkg.cmake `
   -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
@@ -38,54 +67,25 @@ $cmake = "D:/mhy-build-deps/vcpkg/downloads/tools/cmake-3.31.10-windows/cmake-3.
   -DVCPKG_MANIFEST_INSTALL=OFF `
   -DCMAKE_PREFIX_PATH=D:/mhy-build-deps/qt/6.8.0/msvc2022_64 `
   -DQT6_INSTALL_PREFIX=D:/mhy-build-deps/qt/6.8.0/msvc2022_64 `
-  -DCMAKE_INSTALL_PREFIX=./install-ui -DUNIT_TESTS=OFF -DDEV=OFF
-& $cmake --build build/app-release --config Release --parallel 4
-& $cmake --install build/app-release --config Release
+  -DFFMPEG_DIR=D:/mhy-build-deps/ffmpeg -DUNIT_TESTS=OFF -DDEV=OFF
+cmake --build ../build/v2.00 --config Release --parallel 4
+cmake --install ../build/v2.00 --config Release --component Runtime --prefix ../build/manual-stage
+cmake --install ../build/v2.00 --config Release --component Symbols --prefix ../build/manual-symbols
 ```
 
-FFmpeg's headers, import libraries and DLLs must come from the same SDK directory
-selected by cmake/install_ffmpeg.cmake. Do not mix the old FFmpeg 5 development
-files with the new application DLLs. QtConcurrent is now an explicit linked and
-packaged Qt dependency for the tracked login-confirmation task. Its current
-template-only usage does not add a Qt6Concurrent.dll import to the EXE.
+不指定 `FFMPEG_DIR` 时，底层 CMake 保留原先下载 FFmpeg 的行为；维护发行版时应明确指定已验证的 SDK。
 
-## Generated Artifacts
+## 验证与发布
 
-The following entries describe the preserved v1.16.2 build. Current v1.16.4
-artifacts and startup verification are recorded in FIX_v1.16.4.md.
+离线与本机回归执行 `./tools/test.ps1`。实际应用界面测试可在主项目配置时增加
+`-DERYOU_UI_TESTS=ON`，构建 `test_app_ui` 后执行 `ctest --test-dir ../build/v2.00 -C Release --output-on-failure`。
+该测试使用临时配置，不读取实际账号；WebView 检查只初始化官方窗口并取消，不提交登录。
+本次验证记录见 [FIX_v2.00.md](FIX_v2.00.md)。
 
-- ../MHY_Scanner_v1.16.2.exe: versioned EXE with malformed live-packet recovery.
-  It can use the original compatible Qt 6.8.0 and FFmpeg 63/61/10 DLLs and ScanModel.
-- install-ui/MHY_Scanner_1.16.2: independent directory with SDK-matched runtime
-  DLLs, Qt plugins, models and the matching PDB. No account configuration is copied.
-- ../MHY_Scanner_v1.16.2.zip: portable package without the large
-  PDB. The matching PDB remains in the install directory.
-- ../MHY_Scanner_v1.16.2.patch: incremental source diff from commit 96ef29d,
-  fixing decode recovery and updating versions, tests and build documentation.
+至少确认完整编译、对应的回归测试、无账号配置的启动和 ZIP 内容。真实账号、短信、官网验证及实际游戏登录需要单独验证，不得只因接口返回成功就宣称游戏已上线。
 
-EXE SHA-256: 69DBB11CCC033D9386962FACFAECE9FB1E030E866C10120FC34DBCBCF6AFBEB8.
-The original EXE SHA-256 is unchanged:
-85894EF7545F632AD5EF6FF4BB112C9A11B88B9D4A4CF8E6C866A577EBCBAEF4.
+版本号需要同时更新 CMake、Windows RC 元数据和文档；应用显示版本、EXE 与 ZIP 名称从同一个 CMake 版本产生。
 
-Verified for v1.16.2: full application configure/build/install; 19 source
-integration guards; ten C++/Qt regression tests; real models decoding synthetic
-QR codes; PE imports resolving for 14 local modules in each runtime directory.
-UI checks and screenshots cover three window sizes and three confirmation states
-at 125%, 150% and 200% DPI. See UI_LAYOUT.md.
+CI 在 main、标签和手动触发时构建 ZIP artifact，并单独保存带构建编号的 Symbols artifact（默认保留 90 天，应在到期前归档）。用户 ZIP 和 GitHub Release 不包含 PDB。手动在对应版本标签上选择 `create_draft_release` 才创建新的草稿，已存在的 Release 会拒绝覆盖。最终发布前需核对测试结果和哈希。
 
-Actual H.264 encode/decode reproduces error -1094995529 and resumes decoding
-valid keyframes with the same decoder. This also passes with the original
-application's DLLs, which differ in hash from the packaged SDK DLLs. The bounded
-no-valid-frame timeout is retained. See FIX_v1.16.2.md.
-
-Every subsequent redistributed build must increment the version and keep CMake,
-Windows resources, displayed version, artifact names and release tag aligned.
-tests/test_release_version.py guards the source metadata and UI test fixture.
-For this manual release, the tag-triggered build is cancelled so it cannot
-replace the verified package. The publishing credential cannot edit workflows.
-
-The earlier delay build passed isolated 3-second startup checks. This build's
-startup smoke check is deferred because the user's earlier instance is running;
-it is not stopped or replaced. Real GPU capture, live-room scanning and account
-confirmation are not tested against user accounts. Old EXEs, packages, patches
-and the previous install directory remain unchanged.
+CI 默认仍从 FFmpeg 上游 `latest` 下载 SDK，不保证与本地固定 SDK 的二进制相同；CI 制品必须单独验证，不能直接沿用本地包的验证结论。正式发布需要同时保留当次运行依赖、源码和匹配符号。

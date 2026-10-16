@@ -1,4 +1,4 @@
-﻿#include "QRCodeForStream.h"
+#include "QRCodeForStream.h"
 
 #include <string>
 #include <string_view>
@@ -33,11 +33,28 @@ QRCodeForStream::~QRCodeForStream()
     av_dict_free(&pAvdictionary);
 }
 
+void QRCodeForStream::setScanInterval(int intervalMs)
+{
+    submitClock.setInterval(intervalMs);
+}
+
 void QRCodeForStream::setLoginInfo1(const std::string_view uid, const std::string_view stoken, const std::string_view mid)
 {
+    kuroAccount = false;
+    authorizationCancelled.store(false);
+    lastTicket.clear();
+    lastQrCode.clear();
     this->uid = uid;
     this->gameToken = stoken;
     this->mid = mid;
+}
+
+void QRCodeForStream::setKuroLoginInfo(const std::string& uid, const std::string& token)
+{
+    this->uid = uid;
+    kuroAccount = true;
+    authorizationCancelled.store(false);
+    kuroSession.setAccount(token, resultGeneration);
 }
 
 void QRCodeForStream::LoginOfficial()
@@ -110,7 +127,7 @@ void QRCodeForStream::LoginOfficial()
                 stop();
                 break;
             }
-#ifndef SHOW
+#ifdef ERYOU_SCAN_PREVIEW
             cv::imshow("Video_Stream", img);
             cv::waitKey(1);
 #endif
@@ -168,12 +185,24 @@ void QRCodeForStream::scanFrame(const cv::Mat& img)
         {
             return;
         }
+        if (kuroAccount)
+        {
+            if (!KuroApi::isGameQr(str)) return;
+            const auto status = kuroSession.prepare(str, resultGeneration);
+            if (!m_stop.load()) return;
+            if (status == ScanRet::UNKNOW) return;
+            stop();
+            if (status == ScanRet::SUCCESS) Q_EMIT loginConfirm(GameType::WutheringWaves, false, resultGeneration);
+            else Q_EMIT loginResults(status, resultGeneration);
+            return;
+        }
         std::string ticket;
         if (!parseOfficialQRCode(str, ticket) || lastTicket == ticket)
         {
             return;
         }
         const std::string passportQrUrl = PandaScanQRCode(scanUrl, ticket, gameType);
+        if (!m_stop.load()) return;
         const bool success = !passportQrUrl.empty();
         if (success)
         {
@@ -181,13 +210,13 @@ void QRCodeForStream::scanFrame(const cv::Mat& img)
         }
         else
         {
-            Q_EMIT loginResults(ScanRet::FAILURE_1);
+            Q_EMIT loginResults(ScanRet::FAILURE_1, resultGeneration);
         }
         if (success)
         {
             lastTicket = ticket;
             stop();
-            Q_EMIT loginConfirm(gameType, false);
+            Q_EMIT loginConfirm(gameType, false, resultGeneration);
         }
         stop();
     }
@@ -195,7 +224,7 @@ void QRCodeForStream::scanFrame(const cv::Mat& img)
     {
         LogScannerException("stream: QR worker");
         stop();
-        Q_EMIT loginResults(ScanRet::STREAMERROR);
+        Q_EMIT loginResults(ScanRet::STREAMERROR, resultGeneration);
     }
 }
 
@@ -246,7 +275,7 @@ bool QRCodeForStream::convertFrame(cv::Mat& img)
     if (!readyEmitted)
     {
         readyEmitted = true;
-        Q_EMIT streamReady();
+        Q_EMIT streamReady(resultGeneration);
     }
     return true;
 }
@@ -352,9 +381,15 @@ auto QRCodeForStream::init() -> bool
 
 void QRCodeForStream::continueLastLogin()
 {
-    const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) &&
+    if (authorizationCancelled.load()) return;
+    if (kuroAccount)
+    {
+        Q_EMIT loginResults(kuroSession.confirm({}, resultGeneration), resultGeneration);
+        return;
+    }
+    const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) && !authorizationCancelled.load() &&
                           ConfirmPassportQRLogin(lastQrCode, gameToken, mid);
-    Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2);
+    Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2, resultGeneration);
 }
 
 void QRCodeForStream::run()
@@ -375,7 +410,7 @@ void QRCodeForStream::run()
         }
         if (m_stop.load() && init())
         {
-#ifndef SHOW
+#ifdef ERYOU_SCAN_PREVIEW
             cv::namedWindow("Video_Stream", cv::WINDOW_AUTOSIZE);
 #endif
             LoginOfficial();
@@ -395,9 +430,9 @@ void QRCodeForStream::run()
     pendingFrame.release();
     if (ret == ScanRet::LIVESTOP || ret == ScanRet::STREAMERROR)
     {
-        emit loginResults(ret);
+        emit loginResults(ret, resultGeneration);
     }
-#ifndef SHOW
+#ifdef ERYOU_SCAN_PREVIEW
     try
     {
         cv::destroyWindow("Video_Stream");

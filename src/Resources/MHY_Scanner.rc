@@ -3,6 +3,7 @@
 /////////////////////////////////////////////////////////////////////////////
 // 中文(简体，中国) resources
 
+#pragma code_page(65001)
 #include <windows.h>
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_CHS)
@@ -26,8 +27,8 @@ IDI_ICON1               ICON                    "MHY_Scanner.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,16,4,0
- PRODUCTVERSION 1,16,4,0
+ FILEVERSION 2,0,0,0
+ PRODUCTVERSION 2,0,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -42,14 +43,14 @@ BEGIN
     BEGIN
         BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "TODO: <公司名>"
-            VALUE "FileDescription", "MHY扫码器"
-            VALUE "FileVersion", "1.16.4"
-            VALUE "InternalName", "TODO: <内部名称>"
+            VALUE "CompanyName", "ErYouScanner contributors"
+            VALUE "FileDescription", "二游扫码"
+            VALUE "FileVersion", "2.00"
+            VALUE "InternalName", "ErYouScanner"
             VALUE "LegalCopyright", "Copyright (C) 2024"
-            VALUE "OriginalFilename", "MHY_Scanner.exe"
-            VALUE "ProductName", "TODO: <产品名>"
-            VALUE "ProductVersion", "1.16.4"
+            VALUE "OriginalFilename", "二游扫码_v2.00.exe"
+            VALUE "ProductName", "二游扫码"
+            VALUE "ProductVersion", "2.00"
         END
     END
     BLOCK "VarFileInfo"

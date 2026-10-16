@@ -1,8 +1,9 @@
-﻿cmake_minimum_required(VERSION 3.26)
-project(MHY_Scanner
-	VERSION 1.16.4
+cmake_minimum_required(VERSION 3.26)
+project(ErYouScanner
+	VERSION 2.00
 	LANGUAGES CXX
 )
+set(ERYOU_DISPLAY_NAME "二游扫码")
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -10,6 +11,9 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 
 option(UNIT_TESTS "Unit Tests" OFF)
 option(DEV "DEV" OFF)
@@ -17,12 +21,9 @@ option(DEV "DEV" OFF)
 add_definitions(-DMHY_Scanner_VERSION="${PROJECT_VERSION}")
 
 if(MSVC)
-	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 	add_compile_options(/Zi /sdl /arch:AVX2 /utf-8)
 	#add_compile_options("/analyze:external-")
-	if(CMAKE_BUILD_TYPE STREQUAL "Release")
-		add_link_options(/DEBUG /OPT:REF,ICF,LBR)
-	endif()
+	add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF,ICF,LBR>)
 endif()
 
 include(FetchContent)
@@ -55,9 +56,10 @@ include_directories(${CMAKE_SOURCE_DIR}/3rdparty/boost)
 #include_directories(./3rdparty/abogus_cpp)
 #link_directories(./3rdparty/abogus_cpp)
 
-if(NOT DEV)
-	add_definitions(-DTESTSPEED)
-	add_definitions(-DSHOW)
+if(DEV)
+	# Developer builds only. The scan paths show an OpenCV preview window under
+	# this macro; release builds must not link that window in at all.
+	add_definitions(-DERYOU_SCAN_PREVIEW)
 endif()
 
 include_directories(src/Core)
@@ -76,6 +78,10 @@ add_executable(${PROJECT_NAME}
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowMain.h" 
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowLogin.h"
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowLogin.cpp" 
+	"${CMAKE_SOURCE_DIR}/src/UI/WindowLoginKuro.h"
+	"${CMAKE_SOURCE_DIR}/src/UI/WindowLoginKuro.cpp"
+	"${CMAKE_SOURCE_DIR}/src/UI/KuroCaptchaDialog.hpp"
+	"${CMAKE_SOURCE_DIR}/src/UI/KuroScanSmsDialog.hpp"
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowGeeTest.h" 
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowGeeTest.cpp"
 	"${CMAKE_SOURCE_DIR}/src/Core/CryptoKit.cpp"
@@ -96,6 +102,11 @@ add_executable(${PROJECT_NAME}
 	"${CMAKE_SOURCE_DIR}/src/Core/UrlQuery.hpp"
 )
 
+set_target_properties(${PROJECT_NAME} PROPERTIES
+	OUTPUT_NAME "${ERYOU_DISPLAY_NAME}_v${PROJECT_VERSION}"
+	PDB_NAME "${ERYOU_DISPLAY_NAME}_v${PROJECT_VERSION}"
+)
+
 if(NOT DEV)
 	#target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:WINDOWS")
 	set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -107,6 +118,7 @@ set(PROJECT_LIBRARIES
 	wldap32
 	Normaliz
 	Dbghelp
+	Crypt32
 
 	# Qt6
 	Qt6::Core
@@ -149,12 +161,12 @@ if(UNIT_TESTS)
 	target_link_libraries(test_streamlink PRIVATE ${PROJECT_LIBRARIES})
 endif()
 
-# install
-set(Install_Directory "${CMAKE_INSTALL_PREFIX}/${PROJECT_NAME}_${PROJECT_VERSION}")
-
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${Install_Directory})
-
-install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION ${Install_Directory})
+# Relative destinations allow the packager to stage runtime and symbols separately.
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION . COMPONENT Runtime)
+if(MSVC)
+	install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
+		DESTINATION . COMPONENT Symbols)
+endif()
 
 set(QT_DLL_FILES
 	${QT6_INSTALL_PREFIX}/bin/Qt6Core.dll
@@ -168,7 +180,7 @@ install(
 	${QT_DLL_FILES}
 	${FFMPEG_DLL_FILES}
 	DESTINATION 
-	${Install_Directory}
+	. COMPONENT Runtime
 )
 
 install(
@@ -178,19 +190,40 @@ install(
 	${QT6_INSTALL_PREFIX}/plugins/platforms/qoffscreen.dll
 	${QT6_INSTALL_PREFIX}/plugins/platforms/qwindows.dll
 	DESTINATION
-	${Install_Directory}/plugins/platforms
+	plugins/platforms COMPONENT Runtime
 )
 
 install(
 	FILES
 	${QT6_INSTALL_PREFIX}/plugins/styles/qmodernwindowsstyle.dll
 	DESTINATION
-	${Install_Directory}/plugins/styles
+	plugins/styles COMPONENT Runtime
 )
 
 install(
 	DIRECTORY
 	ScanModel
 	DESTINATION
-	${Install_Directory}
+	. COMPONENT Runtime
 )
+
+install(FILES RELEASE_README.md LICENSE DESTINATION . COMPONENT Runtime)
+install(FILES THIRD_PARTY.md DESTINATION . COMPONENT Runtime)
+install(DIRECTORY licenses DESTINATION . COMPONENT Runtime)
+
+option(ERYOU_UI_TESTS "Build isolated application UI regression" OFF)
+if(ERYOU_UI_TESTS)
+	enable_testing()
+	get_target_property(ERYOU_APP_SOURCES ${PROJECT_NAME} SOURCES)
+	list(FILTER ERYOU_APP_SOURCES EXCLUDE REGEX "/[Mm]ain\\.cpp$")
+	add_executable(test_app_ui tests/app_ui/test_app_ui.cpp ${ERYOU_APP_SOURCES})
+	target_include_directories(test_app_ui PRIVATE src/UI)
+	target_link_libraries(test_app_ui PRIVATE ${PROJECT_LIBRARIES})
+	add_custom_command(TARGET test_app_ui POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${QT_DLL_FILES} ${FFMPEG_DLL_FILES}
+		"$<TARGET_FILE_DIR:test_app_ui>")
+	add_test(NAME app_ui_regression COMMAND test_app_ui -platform windows)
+	set_tests_properties(app_ui_regression PROPERTIES
+		ENVIRONMENT "QT_PLUGIN_PATH=${QT6_INSTALL_PREFIX}/plugins;QT_SCREEN_SCALE_FACTORS=1.25"
+		TIMEOUT 120)
+endif()

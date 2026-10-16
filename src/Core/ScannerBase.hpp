@@ -7,10 +7,15 @@
 
 #include "ApiDefs.hpp"
 #include "UrlQuery.hpp"
+#include "KuroScanSession.hpp"
 
 class ScannerBase
 {
 public:
+    bool kuroAccount{false};
+    std::uint64_t resultGeneration{0};
+    std::atomic_bool authorizationCancelled{false};
+    KuroScanSession kuroSession;
     GameType gameType;
     std::string_view scanUrl{};
     std::string_view confirmUrl{};

@@ -23,7 +23,8 @@ enum class GameType
     _3NNN = 10,
     PJSH = 11,
     ZenlessZoneZero = 12,
-    HYG = 13
+    HYG = 13,
+    WutheringWaves = 152
 };
 
 enum class ScanRet
@@ -33,7 +34,12 @@ enum class ScanRet
     FAILURE_1 = 3,
     FAILURE_2 = 4,
     LIVESTOP = 5,
-    STREAMERROR = 6
+    STREAMERROR = 6,
+    KURO_SMS_REQUIRED = 7,
+    ACCOUNT_EXPIRED = 8,
+    QR_EXPIRED = 9,
+    REQUEST_UNKNOWN = 10,
+    REQUEST_CANCELLED = 11
 };
 
 enum class LoginQRCodeState

@@ -8,13 +8,16 @@
 #include <QScrollBar>
 #include <QStyleHints>
 #include <QTextDocument>
+#include <QFrame>
+#include <QToolButton>
+#include <QHBoxLayout>
 
 static bool validateLayout(const Ui::WindowMain& ui)
 {
     if (!ui.centralWidget->layout() ||
         ui.spinConfirmDelay->x() != ui.lineEditUname->x() ||
         ui.spinConfirmDelay->x() != ui.lineEditLiveId->x() ||
-        ui.spinConfirmDelay->width() != ui.lineEditUname->width() ||
+        ui.spinConfirmDelay->width() > 100 ||
         ui.spinConfirmDelay->height() != ui.comboBox->height() ||
         ui.lineEditLiveId->height() != ui.comboBox->height() ||
         qAbs(ui.pBtstartScreen->width() - ui.pBtStream->width()) > 1 ||
@@ -26,9 +29,10 @@ static bool validateLayout(const Ui::WindowMain& ui)
 
     const QList<QWidget*> controls = {
         ui.tableWidget, ui.lineEditUname, ui.labelUname, ui.labelLiveName,
-        ui.lineEditLiveId, ui.labelLiveName_2, ui.comboBox, ui.labelConfirmDelay,
-        ui.spinConfirmDelay, ui.checkBoxAutoLogin, ui.checkBoxAutoScreen,
-        ui.checkBoxAutoExit, ui.pBtstartScreen, ui.pBtStream,
+        ui.lineEditLiveId, ui.labelLiveName_2, ui.comboBox,
+        ui.checkBoxAutoLogin, ui.spinConfirmDelay, ui.labelConfirmDelayHelp,
+        ui.labelScanInterval, ui.spinScanInterval, ui.labelScanIntervalHelp,
+        ui.checkBoxAutoScreen, ui.checkBoxAutoExit, ui.pBtstartScreen, ui.pBtStream,
         ui.label_3, ui.label_2, ui.label, ui.label_4, ui.label_5
     };
     for (qsizetype i = 0; i < controls.size(); ++i)
@@ -95,16 +99,64 @@ int main(int argc, char** argv)
     const int widths[] = {44, 104, 110, 72, 72};
     for (int col = 0; col < 5; ++col) ui.tableWidget->setColumnWidth(col, widths[col]);
     ui.tableWidget->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    ui.tableWidget->horizontalHeader()->setDefaultAlignment(Qt::AlignCenter);
     ui.tableWidget->setRowCount(3);
     const QStringList row = {"1", "100000001", QStringLiteral("\u6d4b\u8bd5\u8d26\u53f7"),
         QStringLiteral("\u5b98\u670d"), QStringLiteral("\u6709\u6548"), QStringLiteral("\u6d4b\u8bd5\u5907\u6ce8")};
     for (int r = 0; r < 3; ++r)
-        for (int c = 0; c < 6; ++c) ui.tableWidget->setItem(r, c, new QTableWidgetItem(row[c]));
+        for (int c = 0; c < 6; ++c) {
+            auto* item = new QTableWidgetItem(row[c]);
+            item->setTextAlignment(Qt::AlignCenter);
+            ui.tableWidget->setItem(r, c, item);
+        }
     ui.tableWidget->selectRow(0);
-    ui.label_3->setText("1.16.4");
+    ui.label_3->setText("2.00");
     ui.lineEditUname->setText(row[2]);
     ui.lineEditLiveId->setEditText("123456");
     ui.checkBoxAutoLogin->setChecked(true);
+
+    auto* cornerWidget = new QWidget(&window);
+    cornerWidget->setObjectName("cornerWidget");
+    cornerWidget->setStyleSheet("background: transparent;");
+    auto* cornerLayout = new QHBoxLayout(cornerWidget);
+    cornerLayout->setContentsMargins(0, 2, 12, 2);
+    cornerLayout->setSpacing(8);
+
+    auto* pill = new QFrame(cornerWidget);
+    pill->setObjectName("pillContainer");
+    pill->setStyleSheet(
+        "#pillContainer { background: #e9ecef; border-radius: 13px; }"
+        "QToolButton { border: none; border-radius: 11px; padding: 3px 12px; font-size: 12px; font-weight: bold; color: #5c6370; background: transparent; }"
+        "QToolButton:checked { background: #ffffff; color: #087e72; border: 1px solid rgba(0, 0, 0, 0.08); }"
+    );
+    auto* pillLayout = new QHBoxLayout(pill);
+    pillLayout->setContentsMargins(2, 2, 2, 2);
+    pillLayout->setSpacing(2);
+    auto* b1 = new QToolButton(pill);
+    b1->setText(QStringLiteral("\u7c73\u54c8\u6e38"));
+    b1->setCheckable(true);
+    b1->setChecked(true);
+    auto* b2 = new QToolButton(pill);
+    b2->setText(QStringLiteral("\u5e93\u8857\u533a"));
+    b2->setCheckable(true);
+    pillLayout->addWidget(b1);
+    pillLayout->addWidget(b2);
+
+    auto* b3 = new QToolButton(cornerWidget);
+    b3->setObjectName("btnAddAccount");
+    b3->setText("+");
+    b3->setStyleSheet(
+        "QToolButton#btnAddAccount {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a73e8, stop:1 #009688);"
+        "  color: #ffffff; border: none; border-radius: 7px;"
+        "  font-size: 16px; font-weight: bold;"
+        "  min-width: 26px; max-width: 26px; min-height: 26px; max-height: 26px; padding: 0px;"
+        "}"
+    );
+    cornerLayout->addWidget(pill);
+    cornerLayout->addWidget(b3);
+    ui.menuBar->setCornerWidget(cornerWidget, Qt::TopRightCorner);
+    cornerWidget->show();
     app.processEvents();
     if (!window.grab().save(QString("confirmation-ui-preview-%1.png").arg(window.devicePixelRatioF()))) return 1;
     ui.lineEditUname->setText(QStringLiteral("\u6d4b\u8bd5\u8d26\u53f7") + QString(80, 'X'));

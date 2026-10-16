@@ -13,8 +13,6 @@
 
 namespace
 {
-constexpr auto CaptureDelay = std::chrono::milliseconds(200);
-
 struct WaitForScreenWorkers
 {
     QThreadPool& pool;
@@ -39,11 +37,28 @@ QRCodeForScreen::~QRCodeForScreen()
     wait();
 }
 
+void QRCodeForScreen::setScanInterval(int intervalMs)
+{
+    m_scanIntervalMs.store(std::max(10, intervalMs));
+}
+
 void QRCodeForScreen::setLoginInfo1(const std::string& uid, const std::string& stoken, const std::string& mid)
 {
+    kuroAccount = false;
+    authorizationCancelled.store(false);
+    lastTicket.clear();
+    lastQrCode.clear();
     this->uid = uid;
     this->gameToken = stoken;
     this->mid = mid;
+}
+
+void QRCodeForScreen::setKuroLoginInfo(const std::string& uid, const std::string& token)
+{
+    this->uid = uid;
+    kuroAccount = true;
+    authorizationCancelled.store(false);
+    kuroSession.setAccount(token, resultGeneration);
 }
 
 void QRCodeForScreen::LoginOfficial()
@@ -62,7 +77,7 @@ void QRCodeForScreen::monitorScreen()
     {
         WriteScannerLog("screen: initialization failed hr=" + std::to_string(capture.lastError()));
         stop();
-        Q_EMIT loginResults(ScanRet::STREAMERROR);
+        Q_EMIT loginResults(ScanRet::STREAMERROR, resultGeneration);
         return;
     }
     const auto maximum = (std::numeric_limits<std::size_t>::max)();
@@ -134,7 +149,7 @@ void QRCodeForScreen::monitorScreen()
         }
         if (!image.empty())
         {
-#ifndef SHOW
+#ifdef ERYOU_SCAN_PREVIEW
             cv::imshow("Video_Stream", image);
             cv::waitKey(1);
 #endif
@@ -147,6 +162,17 @@ void QRCodeForScreen::monitorScreen()
                     }
                     std::string decoded;
                     scanner.decodeSingle(image, decoded);
+                    if (kuroAccount)
+                    {
+                        if (!m_stop.load() || !KuroApi::isGameQr(decoded)) return;
+                        const auto status = kuroSession.prepare(decoded, resultGeneration);
+                        if (!m_stop.load() || isInterruptionRequested()) return;
+                        if (status == ScanRet::UNKNOW) return;
+                        stop();
+                        if (status == ScanRet::SUCCESS) Q_EMIT loginConfirm(GameType::WutheringWaves, true, resultGeneration);
+                        else Q_EMIT loginResults(status, resultGeneration);
+                        return;
+                    }
                     std::string ticket;
                     if (!m_stop.load() || isInterruptionRequested() ||
                         !parseOfficialQRCode(decoded, ticket) ||
@@ -169,37 +195,43 @@ void QRCodeForScreen::monitorScreen()
                         lastTicket = ticket;
                         // Stop capture before publishing a confirmation to the UI.
                         stop();
-                        Q_EMIT loginConfirm(gameType, true);
+                        Q_EMIT loginConfirm(gameType, true, resultGeneration);
                     }
                     else
                     {
                         stop();
-                        Q_EMIT loginResults(ScanRet::FAILURE_1);
+                        Q_EMIT loginResults(ScanRet::FAILURE_1, resultGeneration);
                     }
                 }
                 catch (...)
                 {
                     LogScannerException("screen: QR worker");
                     stop();
-                    Q_EMIT loginResults(ScanRet::STREAMERROR);
+                    Q_EMIT loginResults(ScanRet::STREAMERROR, resultGeneration);
                 }
             });
         }
-        std::this_thread::sleep_for(CaptureDelay);
+        std::this_thread::sleep_for(std::chrono::milliseconds(m_scanIntervalMs.load()));
     }
     const bool reportCaptureFailure = captureFailed && m_stop.exchange(false);
     pool.waitForDone();
     if (reportCaptureFailure)
     {
-        Q_EMIT loginResults(ScanRet::STREAMERROR);
+        Q_EMIT loginResults(ScanRet::STREAMERROR, resultGeneration);
     }
 }
 
 void QRCodeForScreen::continueLastLogin()
 {
-    const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) &&
+    if (authorizationCancelled.load()) return;
+    if (kuroAccount)
+    {
+        Q_EMIT loginResults(kuroSession.confirm({}, resultGeneration), resultGeneration);
+        return;
+    }
+    const bool loggedIn = ScanPassportQRLogin(lastQrCode, gameToken, mid) && !authorizationCancelled.load() &&
                           ConfirmPassportQRLogin(lastQrCode, gameToken, mid);
-    Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2);
+    Q_EMIT loginResults(loggedIn ? ScanRet::SUCCESS : ScanRet::FAILURE_2, resultGeneration);
 }
 
 void QRCodeForScreen::run()
@@ -208,7 +240,7 @@ void QRCodeForScreen::run()
     m_stop.store(true);
     try
     {
-#ifndef SHOW
+#ifdef ERYOU_SCAN_PREVIEW
         cv::namedWindow("Video_Stream", cv::WINDOW_AUTOSIZE);
 #endif
         LoginOfficial();
@@ -216,10 +248,10 @@ void QRCodeForScreen::run()
     catch (...)
     {
         LogScannerException("screen: model or capture initialization");
-        Q_EMIT loginResults(ScanRet::STREAMERROR);
+        Q_EMIT loginResults(ScanRet::STREAMERROR, resultGeneration);
     }
     m_stop.store(false);
-#ifndef SHOW
+#ifdef ERYOU_SCAN_PREVIEW
     try
     {
         cv::destroyWindow("Video_Stream");

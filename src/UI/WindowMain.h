@@ -1,9 +1,11 @@
-﻿#pragma once
+#pragma once
 
 #include <vector>
 
 #include <QRunnable>
 #include <QMainWindow>
+#include <QPointer>
+#include <QDialog>
 
 #include "ApiDefs.hpp"
 #include "ConfigDate.h"
@@ -30,6 +32,9 @@ private:
     ConfigDate* m_config = &ConfigDate::getInstance();
 };
 
+class WindowLogin;
+class WindowLoginKuro;
+
 class WindowMain :
     public QMainWindow
 {
@@ -41,6 +46,7 @@ public:
     void insertTableItems(QString uid, QString userName, QString type, QString notes);
     void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 public Q_SLOTS:
     void AddAccount();
     void SetDefaultAccount();
@@ -71,6 +77,14 @@ Q_SIGNALS:
 
 private:
     void scheduleConfirmation(bool screen);
+    void showKuroSms(bool screen);
+    bool accountControlsBusy() const;
+    bool saveUserInfo();
+    void dispatchStartup(quint64 generation, std::function<void()> action);
+    std::atomic_uint64_t scanGeneration{0};
+    bool startupActive{false};
+    bool confirmationScreen{true};
+    QPointer<QDialog> kuroSmsDialog;
     QThreadPool backgroundTasks;
     std::atomic_bool closing{false};
     ConfirmationDelay confirmationDelay{this};
@@ -85,14 +99,29 @@ private:
     void liveIdError(const LiveStreamStatus status);
     int getSelectedRowIndex();
     bool checkDuplicates(const std::string uid);
-    bool GetStreamLink(LivePlatform platform, const std::string& roomid, std::string& url, std::map<std::string, std::string>& heards);
+    bool GetStreamLink(LivePlatform platform, const std::string& roomid, std::string& url, std::map<std::string, std::string>& heards, quint64 generation);
     configInitLoad configinitload;
     void SetWindowToFront() const;
     WindowLogin* windowLogin{};
     void copyEntireRow(int row);
     void onTableRightClicked(const QPoint& pos);
+    void reauthenticateAccount(int row);
+    void onAccountReauthenticated(const nlohmann::json& identity, const std::string& name,
+        const std::string& token, const std::string& uid, const std::string& mid, const std::string& type);
+    QPointer<QWidget> accountLoginDialog;
     void refreshLiveRoomIds();
     void saveLiveRoomId(const QString& roomId);
     void startAccountSelfCheck();
     void setAccountCheckStatus(int row, bool valid, const QString& status);
+    QFrame* pillContainer{ nullptr };
+    QToolButton* btnMhy{ nullptr };
+    QToolButton* btnKuro{ nullptr };
+    QToolButton* btnAddAccount{ nullptr };
+    QButtonGroup* platformGroup{ nullptr };
+    QString currentPlatformFilter{ "mhy" };
+    WindowLoginKuro* windowLoginKuro{ nullptr };
+    void initCornerSwitcher();
+    void onPlatformChanged(const QString& platform);
+    void applyPlatformFilter();
+    void onAccountAdded(const std::string& name, const std::string& token, const std::string& uid, const std::string& mid, const std::string& type);
 };

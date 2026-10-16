@@ -1,4 +1,8 @@
 <RCC>
-    <qresource prefix="MHY_Scanner">
+    <qresource prefix="/icons">
+        <file>chevron_down.png</file>
+        <file>check.png</file>
+        <file>help_outline.png</file>
+        <file>help_outline_hover.png</file>
     </qresource>
 </RCC>

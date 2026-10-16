@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <atomic>
 #include <mutex>
@@ -36,16 +36,18 @@ public:
     Q_DISABLE_COPY_MOVE(QRCodeForStream)
 
     void setLoginInfo1(const std::string_view uid, const std::string_view stoken, const std::string_view mid);
+    void setKuroLoginInfo(const std::string& uid, const std::string& token);
     void setUrl(const std::string& url, const std::map<std::string, std::string> heard = {});
     auto init() -> bool;
     void run();
     void stop();
     void continueLastLogin();
+    void setScanInterval(int intervalMs);
 
 Q_SIGNALS:
-    void streamReady();
-    void loginResults(const ScanRet ret);
-    void loginConfirm(const GameType gameType, bool b);
+    void streamReady(quint64 generation);
+    void loginResults(const ScanRet ret, quint64 generation);
+    void loginConfirm(const GameType gameType, bool b, quint64 generation);
 
 private:
     std::mutex mtx;

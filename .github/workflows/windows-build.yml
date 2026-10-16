@@ -1,24 +1,26 @@
-﻿name: Windows Build
+name: Windows Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      create_draft_release:
+        description: "Create a new draft release for this version tag (never replace existing assets)"
+        type: boolean
+        default: false
+
 env:
   BUILD_CONFIGURATION: Release
-  INSTALL_DIR: ${{ github.workspace }}\install
-  ZIP_NAME: MHY_Scanner_${{ github.ref_name }}.zip
   VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg-cache,readwrite
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
-  
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,9 +31,9 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.0'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2022_64'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
           cache: true
 
       - name: Cache
@@ -45,40 +47,111 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
 
-      - name: Configure CMake
+      - name: Read package metadata
+        shell: pwsh
         run: |
-          cmake -B build `
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_CONFIGURATION }} `
-          -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake `
-          -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
-          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}\install `
-          -DUNIT_TESTS=OFF `
-          -DDEV=OFF
+          $text = Get-Content CMakeLists.txt -Raw -Encoding utf8
+          $version = [regex]::Match($text, '(?s)project\(ErYouScanner\s+VERSION\s+([0-9.]+)').Groups[1].Value
+          $name = [regex]::Match($text, 'set\(ERYOU_DISPLAY_NAME "([^"]+)"\)').Groups[1].Value
+          if (-not $version -or -not $name) { throw 'Missing package metadata' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw 'The tag and source version do not match'
+          }
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "APP_NAME=$name" >> $env:GITHUB_ENV
+          "PACKAGE_BASE=${name}_v${version}_win64" >> $env:GITHUB_ENV
+          "SYMBOL_BUILD_ID=ci-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_ENV
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 `
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_CONFIGURATION }} `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
+            -DQT6_INSTALL_PREFIX="$env:QT_ROOT_DIR" `
+            -DUNIT_TESTS=OFF -DDEV=OFF
+          if ($LASTEXITCODE) { throw 'CMake configure failed' }
 
       - name: Build
+        shell: pwsh
         run: |
-          cmake --build build --config ${{ env.BUILD_CONFIGURATION }} --parallel
+          cmake --build build --config $env:BUILD_CONFIGURATION --parallel
+          if ($LASTEXITCODE) { throw 'Build failed' }
 
-      - name: Install
+      - name: Install runtime and symbols separately
+        shell: pwsh
         run: |
-          cmake --install build --config ${{ env.BUILD_CONFIGURATION }}
+          cmake --install build --config $env:BUILD_CONFIGURATION --component Runtime --prefix "$env:GITHUB_WORKSPACE/staging/$env:PACKAGE_BASE"
+          if ($LASTEXITCODE) { throw 'Runtime install failed' }
+          cmake --install build --config $env:BUILD_CONFIGURATION --component Symbols --prefix "$env:GITHUB_WORKSPACE/symbols/$env:SYMBOL_BUILD_ID"
+          if ($LASTEXITCODE) { throw 'Symbols install failed' }
 
-      - name: Create ZIP
+      - name: Create ZIP and checksum
+        shell: pwsh
         run: |
-          powershell Compress-Archive -Path "${{ env.INSTALL_DIR }}\*" -DestinationPath "${{ github.workspace }}\${{ env.ZIP_NAME }}"
+          $runtime = "$env:GITHUB_WORKSPACE/staging/$env:PACKAGE_BASE"
+          $forbidden = @(Get-ChildItem $runtime -Recurse -File | Where-Object {
+            $_.Extension -in '.pdb', '.dmp', '.log' -or $_.FullName -match '[\\/]Config[\\/]'
+          })
+          if ($forbidden.Count) { throw 'Private data or symbols in runtime package' }
+          $symbols = "$env:GITHUB_WORKSPACE/symbols/$env:SYMBOL_BUILD_ID"
+          $pdb = @(Get-ChildItem $symbols -File -Filter '*.pdb')
+          if ($pdb.Count -ne 1 -or $pdb[0].Length -eq 0) { throw 'Matching PDB missing' }
+          $exe = "$runtime/$($env:APP_NAME)_v$($env:APP_VERSION).exe"
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $info = [ordered]@{
+            product = 'ErYouScanner'
+            version = $env:APP_VERSION
+            symbolBuildId = $env:SYMBOL_BUILD_ID
+            executableSha256 = $exeHash
+            sourceRevision = $env:GITHUB_SHA
+            builtAtUtc = [DateTime]::UtcNow.ToString('o')
+            dependencyPolicy = 'CI FFmpeg SDK is downloaded from upstream latest; runtime is not assumed identical to local packages'
+            symbols = @($pdb | ForEach-Object { @{ file = $_.Name; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+          }
+          $info | ConvertTo-Json -Depth 5 | Set-Content "$runtime/build-info.json" -Encoding utf8NoBOM
+          Copy-Item "$runtime/build-info.json" $symbols
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Compress-Archive -Path $runtime -DestinationPath "dist/$env:PACKAGE_BASE.zip"
+          $hash = (Get-FileHash "dist/$env:PACKAGE_BASE.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:PACKAGE_BASE.zip" | Set-Content dist/SHA256SUMS.txt -Encoding utf8NoBOM
+          @{ symbolBuildId = $env:SYMBOL_BUILD_ID; executableSha256 = $exeHash; packageSha256 = $hash; package = "$env:PACKAGE_BASE.zip" } |
+            ConvertTo-Json | Set-Content "$symbols/release-info.json" -Encoding utf8NoBOM
 
-      - name: Upload artifact
+      - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ github.workspace }}\${{ env.ZIP_NAME }}
-          retention-days: 5
+          name: ErYouScanner-v${{ env.APP_VERSION }}-win64
+          path: dist/*
+          retention-days: 14
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Upload matching symbols separately
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name }}
-          files: ${{ github.workspace }}\${{ env.ZIP_NAME }}
+          name: ErYouScanner-v${{ env.APP_VERSION }}-symbols-${{ env.SYMBOL_BUILD_ID }}
+          path: symbols/**
+          retention-days: 90
+
+  draft-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.create_draft_release && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ErYouScanner-*-win64
+          path: dist
+          merge-multiple: true
+      - name: Create new draft without replacing an existing release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo 'Release already exists; no assets will be overwritten.'
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$GITHUB_REF_NAME" --notes-file RELEASE_README.md dist/*.zip dist/SHA256SUMS.txt

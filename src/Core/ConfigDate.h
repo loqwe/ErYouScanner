@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <string>
+#include <mutex>
 
 class ConfigDate final
 {
@@ -14,10 +15,10 @@ private:
     ConfigDate();
     ~ConfigDate();
     std::string m_config;
+    mutable std::mutex m_mutex;
     ConfigDate(const ConfigDate& config) = delete;
     const ConfigDate& operator=(const ConfigDate& config) = delete;
     std::string loadConfig();
     std::string readConfigFile(const std::string& filePath);
-    void createDefaultConfigFile(const std::string& filePath, const std::string& Config);
     inline static const char* ConfigFilePath{ "./Config/userinfo.json" };
 };

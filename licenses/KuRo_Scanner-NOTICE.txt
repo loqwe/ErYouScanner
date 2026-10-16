@@ -1,0 +1,12 @@
+KuRo_Scanner
+Upstream: https://github.com/DSVVA/KuRo_Scanner
+Former upstream: https://github.com/Theresa-0328/KuRo_Scanner
+Reference: tag 1.0.0, commit 4ccb99ce4d14160dc5872585ccaabd84ee9424ed
+License: GNU General Public License, version 3 (see ../LICENSE)
+
+ErYouScanner v2.0.2 adapts the SMS/GeeTest login interaction and API fields
+from src/UI/WindowGeeTest.cpp, src/UI/WindowLogin.cpp and src/Core/KuRoApi.cpp.
+The C++ implementation adds cancellation-safe WebView2 ownership, direct
+HTML hosting, bridge origin/field validation, request timeouts, SMS cooldown,
+private credential validation, and redacted diagnostics. The upstream EXE,
+PDB and account/browser data are not bundled.

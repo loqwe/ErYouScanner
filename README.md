@@ -1,4 +1,4 @@
-# 二游扫码 · ErYouScanner
+#ErYouScanner
 
 Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.com/DSVVA/MHY_Scanner) 持续开发，保留米哈游官服扫码功能，并接入库街区账号扫码。
 

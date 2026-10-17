@@ -1158,6 +1158,14 @@ bool WindowMain::GetStreamLink(LivePlatform platform, const std::string& roomid,
                 "Referer: https://live.bilibili.com/\r\n"
                 "Origin: https://live.bilibili.com\r\n";
         }
+        else if (platform == LivePlatform::Douyin)
+        {
+            heards["user_agent"] =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "Chrome/120.0.0.0 Safari/537.36";
+            heards["headers"] =
+                "Referer: https://live.douyin.com/\r\n";
+        }
         return true;
     }
     else

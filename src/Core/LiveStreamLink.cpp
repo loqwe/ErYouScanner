@@ -159,16 +159,19 @@ std::string FetchDouyinTtwid(const std::string& roomID)
         cpr::ConnectTimeout{ 3000 }
     );
 
-    if (resp.cookies.find("ttwid") != resp.cookies.end())
-    {
-        return resp.cookies["ttwid"];
-    }
-
     std::smatch match;
     const std::regex ttwidRegex(R"(ttwid=([^;\s]+))", std::regex::icase);
     if (std::regex_search(resp.raw_header, match, ttwidRegex) && match.size() > 1)
     {
         return match[1].str();
+    }
+
+    for (const auto& [k, v] : resp.header)
+    {
+        if (std::regex_search(v, match, ttwidRegex) && match.size() > 1)
+        {
+            return match[1].str();
+        }
     }
 
     return "";

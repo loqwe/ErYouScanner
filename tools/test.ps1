@@ -16,7 +16,7 @@ $json = Join-Path $sourceRoot '.deps/nlohmann_json/include'
 $ffmpeg = Join-Path $sourceRoot '.deps/ffmpeg'
 $toolchain = Join-Path $DependencyRoot 'vcpkg/scripts/buildsystems/vcpkg.cmake'
 $installed = Join-Path $DependencyRoot 'installed'
-$tests = @('kuro_protocol', 'account_storage', 'confirmation_delay', 'task_boundary', 'qr_scanner', 'screen_capture', 'stream_frame')
+$tests = @('kuro_protocol', 'account_storage', 'confirmation_delay', 'task_boundary', 'qr_scanner', 'screen_capture', 'stream_frame', 'mhy_sms')
 foreach ($name in $tests) {
     $build = Join-Path $workspaceRoot "build/tests/$name"
     $configure = @('-S', (Join-Path $sourceRoot "tests/$name"), '-B', $build,

@@ -458,7 +458,7 @@ int main(int argc, char** argv)
         WindowMain window;
         window.show();
         events(300);
-        require(window.windowTitle() == QStringLiteral("二游扫码"), "old product title");
+        require(window.windowTitle() == QStringLiteral("ErYouScanner"), "old product title");
         QToolButton* kuro = nullptr;
         for (auto* button : window.findChildren<QToolButton*>())
             if (button->text() == QStringLiteral("库街区")) kuro = button;

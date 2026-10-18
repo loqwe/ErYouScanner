@@ -104,8 +104,8 @@ $forbidden = @($files | Where-Object {
     $_.Name -in @('userinfo.json', 'accounts.dpapi')
 })
 if ($forbidden.Count) { throw 'Private configuration, logs, dumps or symbols were found in the runtime staging directory.' }
-$executable = Join-Path $runtimeRoot "${productName}_v$version.exe"
-if (-not (Test-Path -LiteralPath $executable)) { throw 'The versioned executable is missing.' }
+$executable = Join-Path $runtimeRoot "$productName.exe"
+if (-not (Test-Path -LiteralPath $executable)) { throw 'The application executable is missing.' }
 if ((Get-Item -LiteralPath $executable).VersionInfo.ProductVersion -ne $version) {
     throw 'The executable version does not match CMakeLists.txt.'
 }

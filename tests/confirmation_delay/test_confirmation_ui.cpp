@@ -110,7 +110,7 @@ int main(int argc, char** argv)
             ui.tableWidget->setItem(r, c, item);
         }
     ui.tableWidget->selectRow(0);
-    ui.label_3->setText("2.01");
+    ui.label_3->setText("2.0.1");
     ui.lineEditUname->setText(row[2]);
     ui.lineEditLiveId->setEditText("123456");
     ui.checkBoxAutoLogin->setChecked(true);

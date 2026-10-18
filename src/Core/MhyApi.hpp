@@ -22,6 +22,7 @@
 #include "UrlQuery.hpp"
 #include "ScannerLog.hpp"
 #include "StokenResponse.hpp"
+#include "MhySmsResponse.hpp"
 
 static const std::string device_id{ CreateUUID::CreateUUID4() };
 static GameType loginType{ GameType::HonkaiStarRail };
@@ -395,88 +396,61 @@ inline bool ConfirmPassportQRLogin(
     return PassportQRCodeLogin(qrCode, stoken, mid, true);
 }
 
-inline std::tuple<int, GeetestData> CreateLoginCaptcha(
+inline MhySmsResult CreateLoginCaptcha(
     const std::string_view mobile,
     const std::string_view aigis = "")
 {
-    const std::string body{ nlohmann::json{
-        { "area_code", Encrypt("+86") },
-        { "mobile", Encrypt(mobile) } }
-                                .dump() };
-    cpr::Header reqHeaders{ GetRequestHeader() };
-    reqHeaders["DS"] = DataSignAlgorithmVersionGen2(body, "");
-    if (!aigis.empty())
-        reqHeaders["X-Rpc-Aigis"] = aigis;
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::passport::login_by_mobile_captcha },
-        cpr::Body{ body },
-        cpr::Header{ reqHeaders });
-
-    const auto j = nlohmann::json::parse(response.text);
-    const int retcode = j.value("retcode", -1);
-    GeetestData result{};
-    if (retcode == 0)
+    try
     {
-        result.action_type = j["data"]["action_type"].get<std::string>();
-        return { retcode, result };
-    }
-    if (retcode == -3101)
-    {
+        const auto body = nlohmann::json{{"area_code", Encrypt("+86")}, {"mobile", Encrypt(mobile)}}.dump();
+        auto headers = GetRequestHeader();
+        headers["DS"] = DataSignAlgorithmVersionGen2(body, "");
+        if (!aigis.empty()) headers["X-Rpc-Aigis"] = aigis;
+        const auto response = cpr::Post(cpr::Url{api::mhy::passport::create_captcha},
+            cpr::Body{body}, cpr::Header{headers}, cpr::Timeout{15000});
+        WriteScannerLog(std::format("mhy sms: stage=createLoginCaptcha http={} transport={} bytes={} proof={}",
+            response.status_code, static_cast<int>(response.error.code), response.text.size(), !aigis.empty()));
+        if (response.error || response.status_code != 200)
+            return { MhySmsTransportError };
         const auto it = response.header.find("X-Rpc-Aigis");
-        if (it != response.header.end())
-        {
-            const auto aigisJson = nlohmann::json::parse(it->second);
-            const auto captchaJson = nlohmann::json::parse(aigisJson["data"].get<std::string>());
-
-            result.session_id = aigisJson["session_id"].get<std::string>();
-            result.mmt_type = aigisJson["mmt_type"].get<int>();
-            result.gt = captchaJson["gt"].get<std::string>();
-            result.challenge = captchaJson["challenge"].get<std::string>();
-            result.GeeTestType = ServerType::Official;
-        }
+        WriteScannerLog("mhy sms: stage=response shape=" + MhySmsResponseShape(
+            response.text, it == response.header.end() ? "" : it->second));
+        auto result = ParseMhySmsResponse(response.text, it == response.header.end() ? "" : it->second);
+        WriteScannerLog(std::format("mhy sms: stage=createLoginCaptcha retcode={} challenge={}",
+            result.retcode, result.data.mmt_type != 0));
+        return result;
     }
-    return { retcode, result };
+    catch (...)
+    {
+        WriteScannerLog("mhy sms: stage=createLoginCaptcha exception; result unknown");
+        return { MhySmsTransportError };
+    }
 }
 
 inline auto LoginByMobileCaptcha(const std::string_view actionType, const std::string_view mobile, const std::string_view captcha, const std::string_view aigis = "")
 {
-    struct
+    try
     {
-        int retcode{};
-        struct
-        {
-            std::string V2Token{};
-            std::string aid{};
-            std::string mid{};
-        } data;
-    } result;
-#if 0
-	const std::string RequestBody{ std::format(R"({{"area_code":"{}","action_type":"{}","captcha":"{}","mobile":"{}"}})", Encrypt("+86"), actionType, captcha, Encrypt(mobile)) };
-    std::map<std::string, std::string> headers{ GetRequestHeader() };
-    headers["DS"] = DataSignAlgorithmVersionGen2(RequestBody, "");
-    if (!aigis.empty())
-    {
-        headers["X-Rpc-Aigis"] = aigis;
-    }
-    HttpClient h;
-    std::string s;
-    h.PostRequest(s, URL_LoginByMobileCaptcha, RequestBody, headers);
-    //std::cout << s << std::endl;
-    json::Json j{};
-    j.parse(s);
-    result.retcode = j["retcode"];
-    if (result.retcode == -3205)
-    {
+        const auto body = nlohmann::json{{"area_code", Encrypt("+86")}, {"mobile", Encrypt(mobile)},
+            {"action_type", actionType}, {"captcha", captcha}}.dump();
+        auto headers = GetRequestHeader();
+        headers["DS"] = DataSignAlgorithmVersionGen2(body, "");
+        if (!aigis.empty()) headers["X-Rpc-Aigis"] = aigis;
+        const auto response = cpr::Post(cpr::Url{api::mhy::passport::login_by_mobile_captcha},
+            cpr::Header{headers}, cpr::Body{body}, cpr::Timeout{15000});
+        WriteScannerLog(std::format("mhy sms: stage=loginByMobileCaptcha http={} transport={} bytes={}",
+            response.status_code, static_cast<int>(response.error.code), response.text.size()));
+        if (response.error || response.status_code != 200)
+            return MhyMobileLoginResult{MhySmsTransportError};
+        auto result = ParseMhyMobileLoginResponse(response.text);
+        WriteScannerLog(std::format("mhy sms: stage=loginByMobileCaptcha retcode={}", result.retcode));
         return result;
     }
-    else if (result.retcode == 0)
+    catch (...)
     {
-        result.data.V2Token = j["data"]["token"]["token"];
-        result.data.aid = j["data"]["user_info"]["aid"];
-        result.data.mid = j["data"]["user_info"]["mid"];
+        WriteScannerLog("mhy sms: stage=loginByMobileCaptcha exception; result unknown");
+        return MhyMobileLoginResult{MhySmsTransportError};
     }
-#endif
-    return result;
 }
 
 inline bool ScanQRLogin(const std::string_view url, const std::string_view ticket, GameType gameType)

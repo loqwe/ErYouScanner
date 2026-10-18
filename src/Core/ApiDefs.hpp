@@ -57,6 +57,10 @@ struct GeetestData
     int mmt_type{};
     std::string gt{};
     std::string challenge{};
+    bool use_v4 = false;
+    std::string risk_type;
+    bool new_captcha = true;
+    bool offline = false;
     ServerType GeeTestType{};
 };
 

@@ -40,7 +40,6 @@ signals:
     void AddUserInfo(const std::string& name, const std::string token, const std::string uid, const std::string mid, const std::string type);
     void QrcodeLoginResult(bool result);
     void StartQRCodeTimer();
-    void ButtonEnabled(bool enabled);
 
 private slots:
 
@@ -67,6 +66,9 @@ private:
     QHBoxLayout* Tab0HLayout2{};
     QTimer* Tabs0Timer;
     int remainingSeconds{};
+    bool smsPending = false;
+    QString smsMobile;
+    void requestSms(const std::string& aigis = {});
 
     void InitTabs1();
     QVBoxLayout* Tab1MainVLayout{};

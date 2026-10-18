@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     QApplication a(argc, argv);
     QCoreApplication::setApplicationName("ErYouScanner");
     QCoreApplication::setApplicationVersion(MHY_Scanner_VERSION);
-    QApplication::setApplicationDisplayName(QString::fromUtf8("二游扫码"));
+    QApplication::setApplicationDisplayName("ErYouScanner");
     if (!QDir::setCurrent(QCoreApplication::applicationDirPath()))
     {
         QMessageBox::information(nullptr, "启动失败", "无法进入程序所在目录。", QMessageBox::Yes);
@@ -51,7 +51,9 @@ int main(int argc, char* argv[])
     if (isOpen())
     {
         WriteScannerLog("startup: existing instance detected; activating its window");
-        HWND hwnd = FindWindowW(NULL, L"二游扫码");
+        HWND hwnd = FindWindowW(NULL, L"ErYouScanner");
+        if (hwnd == NULL)
+            hwnd = FindWindowW(NULL, L"二游扫码");
         if (hwnd == NULL)
             hwnd = FindWindowW(NULL, L"MHY扫码器");
         if (hwnd == NULL)

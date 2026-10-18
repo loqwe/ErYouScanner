@@ -1,6 +1,6 @@
 # 本地构建与打包
 
-当前发行版本 **v2.01**，产品名 **二游扫码**，CMake target 为 `ErYouScanner`。源码目录已迁移为 `D:/崩铁脚本/二游扫码/source`。旧版验证记录保留在 `FIX_v1.16.*.md` 等历史文档中。
+当前发行版本 **v2.0.1**，产品名和 CMake target 为 `ErYouScanner`，程序为 `ErYouScanner.exe`。源码目录为 `D:/崩铁脚本/二游扫码/source`。旧版验证记录保留在历史文档中。
 
 ## 依赖
 
@@ -12,7 +12,7 @@
 
 现有开发依赖继续放在 `D:/mhy-build-deps`，不随产品改名迁移。默认 Qt 路径是 `D:/mhy-build-deps/qt/6.8.0/msvc2022_64`。脚本优先使用 `source/.deps/ffmpeg`，也支持显式指定已有 FFmpeg SDK，不自动选择新的 `latest` 替换本地依赖。JSON 依赖默认使用 `source/.deps/nlohmann_json`，存在时通过 FetchContent 源码覆盖参数使用；可用 `-JsonSourceRoot` 指定其他源码目录，避免依赖旧 build 中的缓存。
 
-旧 CMake 缓存含原目录的绝对路径，不能把旧 build 文件夹搬过来直接增量编译。新版本统一配置到同级 `../build/v2.01`。
+旧 CMake 缓存含原目录的绝对路径，不能把旧 build 文件夹搬过来直接增量编译。新版本统一配置到同级 `../build/v2.0.1`。
 
 ## 一条命令构建并打包
 
@@ -39,27 +39,29 @@
 输出位置：
 
 ```text
-../build/v2.01/                         编译目录
-../build/staging-v2.01-<id>/             当次干净打包目录
-../releases/v2.01/
-  二游扫码_v2.01_win64.zip
+../build/v2.0.1/                        编译目录
+../build/staging-v2.0.1-<id>/            当次干净打包目录
+../releases/v2.0.1/
+  ErYouScanner_v2.0.1_win64.zip
   SHA256SUMS.txt
-../symbols/v2.01/<build-id>/
-  二游扫码_v2.01.pdb
+../symbols/v2.0.1/<build-id>/
+  ErYouScanner_v2.0.1.pdb
   build-info.json
   release-info.json
 ```
 
-ZIP 内有一个完整运行目录、版本化 EXE、依赖、模型、许可、使用说明和 `build-info.json`。清单包含唯一符号构建编号、EXE/PDB 哈希、源码提交、是否有未提交改动、运行文件哈希及构建时间，可用于找到精确对应的 PDB。PDB 先暂存在当次 staging，ZIP 压缩成功后归档到唯一 build-id 目录，不覆盖同版本旧符号；符号旁的 `release-info.json` 额外记录最终 ZIP 哈希。源码提交值本身不能代替保存未提交源码。
+ZIP 内有一个完整运行目录、`ErYouScanner.exe`、依赖、模型、许可、使用说明和 `build-info.json`。ZIP 与文件属性保留版本号。清单包含唯一符号构建编号、EXE/PDB 哈希、源码提交、是否有未提交改动、运行文件哈希及构建时间，可用于找到精确对应的 PDB。PDB 先暂存在当次 staging，ZIP 压缩成功后归档到唯一 build-id 目录，不覆盖同版本旧符号；符号旁的 `release-info.json` 额外记录最终 ZIP 哈希。源码提交值本身不能代替保存未提交源码。
 
 脚本不会运行程序、替换 `app`、提交、推送或发布 GitHub Release。
+
+发布说明按 [固定格式](RELEASE_TEMPLATE.md) 编写，保存为 `doc/RELEASE_v<版本号>.md`。正式发布使用本地完成验收的 ZIP 与校验文件。
 
 ## 直接使用 CMake
 
 脚本等价于以下流程；工具链、Qt 和 FFmpeg 目录按实际环境填写：
 
 ```powershell
-cmake --fresh -S . -B ../build/v2.01 -G 'Visual Studio 17 2022' -A x64 `
+cmake --fresh -S . -B ../build/v2.0.1 -G 'Visual Studio 17 2022' -A x64 `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_TOOLCHAIN_FILE=D:/mhy-build-deps/vcpkg/scripts/buildsystems/vcpkg.cmake `
   -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `

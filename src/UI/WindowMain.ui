@@ -5,7 +5,7 @@
   <property name="geometry"><rect><x>0</x><y>0</y><width>660</width><height>620</height></rect></property>
   <property name="minimumSize"><size><width>620</width><height>560</height></size></property>
   <property name="font"><font><family>Microsoft YaHei</family><pointsize>9</pointsize></font></property>
-  <property name="windowTitle"><string>二游扫码</string></property>
+  <property name="windowTitle"><string>ErYouScanner</string></property>
   <property name="styleSheet">
    <string notr="true">QMainWindow, QWidget#centralWidget { background: #f5f6f7; color: #24272b; }
 QLabel { color: #24272b; }
@@ -286,7 +286,7 @@ QFrame#footerSeparator { color: #d3d8dd; }</string>
       <item><widget class="QLabel" name="label_2"><property name="text"><string>源项目</string></property></widget></item>
       <item><widget class="QLabel" name="label"><property name="text"><string>&lt;a style=&quot;color:#176c61;text-decoration:none&quot; href=&quot;https://github.com/DSVVA/MHY_Scanner&quot;&gt;DSVVA/MHY_Scanner&lt;/a&gt;</string></property><property name="openExternalLinks"><bool>true</bool></property></widget></item>
       <item><widget class="QLabel" name="label_4"><property name="text"><string>二改</string></property></widget></item>
-      <item><widget class="QLabel" name="label_5"><property name="text"><string>&lt;a style=&quot;color:#176c61;text-decoration:none&quot; href=&quot;https://github.com/loqwe/MHY_Scanner2&quot;&gt;loqwe/MHY_Scanner2&lt;/a&gt;</string></property><property name="openExternalLinks"><bool>true</bool></property></widget></item>
+      <item><widget class="QLabel" name="label_5"><property name="text"><string>&lt;a style=&quot;color:#176c61;text-decoration:none&quot; href=&quot;https://github.com/loqwe/ErYouScanner&quot;&gt;loqwe/ErYouScanner&lt;/a&gt;</string></property><property name="openExternalLinks"><bool>true</bool></property></widget></item>
      </layout>
     </item>
    </layout>

@@ -7,6 +7,8 @@
 
 #include <Base64.hpp>
 #include <QThread>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include "MhyApi.hpp"
 #include "UtilMat.hpp"
@@ -192,6 +194,62 @@ void WindowLogin::InitTabs2()
 }
 
 
+void WindowLogin::requestSms(const std::string& aigis)
+{
+    if (smsPending || Tabs0Timer->isActive() || !phoneNumberLineEdit->hasAcceptableInput()) return;
+    const auto mobile = phoneNumberLineEdit->text();
+    smsPending = true;
+    phoneNumberLineEdit->setEnabled(false);
+    pbtSend->setEnabled(false);
+    pbtSend->setText("请求中");
+    Tab0pbtConfirm->setEnabled(false);
+    if (aigis.empty()) GeeTestInfo = {};
+    auto* watcher = new QFutureWatcher<MhySmsResult>(this);
+    connect(watcher, &QFutureWatcher<MhySmsResult>::finished, this, [this, watcher, mobile] {
+        const auto result = watcher->result();
+        watcher->deleteLater();
+        smsPending = false;
+        if (result.retcode == 0)
+        {
+            GeeTestInfo = result.data;
+            smsMobile = mobile;
+            remainingSeconds = result.countdown;
+            pbtSend->setText(QString::number(remainingSeconds) + "秒");
+            Tabs0Timer->start(1000);
+            phoneNumberLineEdit->setEnabled(true);
+            Tab0pbtConfirm->setEnabled(true);
+            verifyCodeLineEdit->setFocus();
+            return;
+        }
+        if (result.retcode == -3101 && result.data.mmt_type)
+        {
+            GeeTestInfo = result.data;
+            pbtSend->setText("待验证");
+            m_WindowGeeTest.Init(GeeTestInfo);
+            m_WindowGeeTest.show();
+            return;
+        }
+        phoneNumberLineEdit->setEnabled(true);
+        pbtSend->setEnabled(phoneNumberLineEdit->hasAcceptableInput());
+        pbtSend->setText("发送");
+        if (result.retcode == MhySmsTransportError)
+            emit showMessagebox("短信请求结果未知，请先查看手机是否收到短信，避免重复发送。详细信息见 Config/scanner.log。");
+        else if (result.retcode == -3008)
+            emit showMessagebox("手机号格式错误，请检查后重试。");
+        else if (result.retcode == -3006)
+            emit showMessagebox("请求过于频繁，请稍后再试。");
+        else if (result.retcode == -3101)
+            emit showMessagebox("服务器要求人机验证，但未返回可用的验证参数。请稍后重试。");
+        else if (result.retcode == MhySmsInvalidResponse)
+            emit showMessagebox("平台响应格式异常，暂时无法确认短信发送状态，请先查看手机。详细信息见 Config/scanner.log。");
+        else
+            emit showMessagebox(QString("申请短信验证码失败（返回码 %1），详细信息见 Config/scanner.log。").arg(result.retcode));
+    });
+    watcher->setFuture(QtConcurrent::run([mobile = mobile.toStdString(), aigis] {
+        return CreateLoginCaptcha(mobile, aigis);
+    }));
+}
+
 void WindowLogin::Initconnect()
 {
     connect(this, &WindowLogin::showMessagebox, this, [this](const QString& Message) {
@@ -247,34 +305,29 @@ void WindowLogin::Initconnect()
     });
 
     connect(phoneNumberLineEdit, &QLineEdit::textChanged, this, [this] {
-        if (phoneNumberLineEdit->text().toStdString().size() >= 11)
-        {
-            pbtSend->setEnabled(true);
-        }
-        else
-        {
-            pbtSend->setEnabled(false);
-        }
+        pbtSend->setEnabled(!smsPending && !Tabs0Timer->isActive() && phoneNumberLineEdit->hasAcceptableInput());
+        Tab0pbtConfirm->setEnabled(!smsPending && phoneNumberLineEdit->text() == smsMobile &&
+            !GeeTestInfo.action_type.empty());
     });
 
     connect(&m_WindowGeeTest, &WindowGeeTest::postMessage, this, [this](const QString& Message) {
-        m_WindowGeeTest.close();
-        if (GeeTestInfo.GeeTestType == ServerType::Official)
+        if (GeeTestInfo.GeeTestType == ServerType::Official && !smsPending)
         {
-            QThreadPool::globalInstance()->start([this, Message]() {
-                auto [code, data] = CreateLoginCaptcha(phoneNumberLineEdit->text().toStdString(),
-                                                       GeeTestInfo.session_id + ";" + Message.toUtf8().toBase64().toStdString());
-                if (code == 0)
-                {
-                    GeeTestInfo.action_type = data.action_type;
-                    emit ButtonEnabled(true);
-                }
-                else if (code == -3006)
-                {
-                    emit showMessagebox("请求过于频繁，请稍后再试");
-                }
-            });
+            const auto aigis = GeeTestInfo.session_id + ";" + Message.toUtf8().toBase64().toStdString();
+            m_WindowGeeTest.close();
+            requestSms(aigis);
         }
+    });
+
+    connect(&m_WindowGeeTest, &WindowGeeTest::closed, this, [this] {
+        if (smsPending) return;
+        phoneNumberLineEdit->setEnabled(true);
+        pbtSend->setText("发送");
+        pbtSend->setEnabled(!Tabs0Timer->isActive() && phoneNumberLineEdit->hasAcceptableInput());
+    });
+    connect(&m_WindowGeeTest, &WindowGeeTest::failed, this, [this](const QString& message) {
+        m_WindowGeeTest.close();
+        emit showMessagebox(message);
     });
 
     connect(Tabs0Timer, &QTimer::timeout, this, [this]() {
@@ -283,54 +336,59 @@ void WindowLogin::Initconnect()
         if (remainingSeconds <= 0)
         {
             Tabs0Timer->stop();
-            pbtSend->setEnabled(true);
+            pbtSend->setEnabled(!smsPending && phoneNumberLineEdit->hasAcceptableInput());
             pbtSend->setText("发送");
         }
     });
 
-    connect(this, &WindowLogin::ButtonEnabled, this, [this](bool enabled) {
-        if (enabled)
-        {
-            pbtSend->setEnabled(false);
-            Tabs0Timer->start(1000);
-            remainingSeconds = 60;
-        }
-        Tab0pbtConfirm->setEnabled(enabled);
-    });
-
     connect(pbtSend, &QPushButton::clicked, this, [this] {
-        QThreadPool::globalInstance()->start([this] {
-            auto [code, data] = CreateLoginCaptcha(phoneNumberLineEdit->text().toStdString());
-            if (data.mmt_type)
-            {
-                GeeTestInfo = data;
-                m_WindowGeeTest.Init(stringTowstring(GeeTestInfo.gt), stringTowstring(GeeTestInfo.challenge));
-                emit showWindowGeeTest(true);
-            }
-            else if (!GeeTestInfo.mmt_type)
-            {
-                emit ButtonEnabled(true);
-            }
-            else if (code == -3008)
-            {
-                emit showMessagebox("手机号错误");
-            }
-        });
+        requestSms();
     });
 
     connect(Tab0pbtConfirm, &QPushButton::clicked, this, [this] {
-        QThreadPool::globalInstance()->start([this] {
-            auto result = LoginByMobileCaptcha(GeeTestInfo.action_type, phoneNumberLineEdit->text().toStdString(), verifyCodeLineEdit->text().toStdString());
+        const auto mobile = phoneNumberLineEdit->text();
+        if (smsPending || mobile != smsMobile || GeeTestInfo.action_type.empty()) return;
+        const auto captcha = verifyCodeLineEdit->text().toStdString();
+        if (captcha.empty()) { emit showMessagebox("请输入收到的短信验证码"); return; }
+        smsPending = true;
+        phoneNumberLineEdit->setEnabled(false);
+        pbtSend->setEnabled(false);
+        Tab0pbtConfirm->setEnabled(false);
+        using LoginResult = std::pair<MhyMobileLoginResult, std::string>;
+        auto* watcher = new QFutureWatcher<LoginResult>(this);
+        connect(watcher, &QFutureWatcher<LoginResult>::finished, this, [this, watcher] {
+            auto [result, name] = watcher->result();
+            watcher->deleteLater();
+            smsPending = false;
+            phoneNumberLineEdit->setEnabled(true);
+            pbtSend->setEnabled(!Tabs0Timer->isActive() && phoneNumberLineEdit->hasAcceptableInput());
+            Tab0pbtConfirm->setEnabled(phoneNumberLineEdit->text() == smsMobile);
             if (result.retcode == -3205)
             {
                 emit showMessagebox("短信验证码错误");
             }
             else if (result.retcode == 0)
             {
-                const std::string name{ getMysUserName(result.data.aid) };
                 emit AddUserInfo(name, result.data.V2Token, result.data.aid, result.data.mid, "官服");
             }
+            else if (result.retcode == MhySmsTransportError)
+                emit showMessagebox("登录请求结果未知，请检查网络后再操作。程序未自动重试。");
+            else if (result.retcode == MhySmsInvalidResponse)
+                emit showMessagebox("登录响应格式异常，未添加账号。详细信息见 Config/scanner.log。");
+            else
+                emit showMessagebox(QString("短信登录失败（返回码 %1），详细信息见 Config/scanner.log。").arg(result.retcode));
         });
+        watcher->setFuture(QtConcurrent::run([action = GeeTestInfo.action_type, mobile = mobile.toStdString(), captcha] {
+            auto result = LoginByMobileCaptcha(action, mobile, captcha);
+            std::string name;
+            if (result.retcode == 0)
+            {
+                try { name = getMysUserName(result.data.aid); }
+                catch (...) { WriteScannerLog("mhy sms: username lookup failed"); }
+                if (name.empty()) name = result.data.aid;
+            }
+            return LoginResult{std::move(result), std::move(name)};
+        }));
     });
 
     connect(pBtofficialLogin, &QPushButton::clicked, this, [this] {

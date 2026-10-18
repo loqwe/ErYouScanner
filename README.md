@@ -18,8 +18,6 @@ Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.
 - 直播间历史自动保存；B 站支持房间号和完整链接。
 - DXGI 屏幕捕获支持 RGBA16F 浮点纹理，保留直播坏包恢复、超时和后台任务异常保护。
 
-库街区短信登录参考 [DSVVA/KuRo_Scanner](https://github.com/DSVVA/KuRo_Scanner/tree/1.0.0)，游戏扫码协议参考 [tide-scanner](https://github.com/Rocszzz/tide-scanner)。UI 沿用本项目，未改用 Python。真实账号登录、短信验证及完整游戏上线结果仍需要实际账号验证，不能用本地接口模拟结果代替。
-
 ## 开始使用
 
 将 `ErYouScanner_v2.0.1_win64.zip` **完整解压**到可写目录，启动 `ErYouScanner.exe`。一起保留 DLL、`plugins`、`ScanModel`；不要单独复制 EXE。运行需要 [Visual C++ x64 运行时库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
@@ -46,17 +44,9 @@ Windows 账号凭据使用当前用户 DPAPI 加密保存；历史明文配置�
 
 日志位置：`Config/scanner.log`。反馈时提供程序版本、出错时间、操作步骤和相关日志末尾，不要提交 Token、Cookie、验证码或完整二维码。日志记录阶段、业务返回码和可用异常信息。
 
-日志达到 1MB 后滚动，保留当前文件和 3 个历史文件；本版修复与验证见 [v2.01 记录](doc/FIX_v2.01.md)。日志会记录服务端返回的 `msg`（截断并去除控制字符），因此失败原因不必再从业务码猜。业务码 242 的含义已核实为**服务端限流**（服务端原话：发送短信频繁），按账号计，实测窗口超过 53 分钟，现场取证见 [242 抓包结论](doc/DIAG_v2.0.7_242_live_probe.md)。收到 242 后软件会停止本次会话内的重试。
-
 可捕获的致命异常会尽量追加 `fatal:` 日志并生成转储；系统强杀、直接 fail-fast 或进入 `main` 之前的错误可能绕过处理器。转储可能含账号内存，请勿公开上传 `.dmp`。
 
 屏幕捕获使用 DXGI / D3D11，优先选择连接显示器的 GPU；二维码识别和当前直播解码仍使用 CPU，不代表开启 GPU 推理。
-
-## 开发与发行管理
-
-唯一源码放在 `source`，日常运行环境放在同级 `app`，历史 ZIP、符号和诊断材料分别归档。目录说明见 [项目管理](doc/PROJECT_LAYOUT.md)，构建及打包见 [本地构建](doc/BUILD_LOCAL.md)。
-
-GitHub 发行只提供带版本号的 ZIP 与 SHA-256 校验值，不单独上传 EXE，也不在用户包中携带 PDB、账号、日志或崩溃转储。
 
 ## 来源与许可
 

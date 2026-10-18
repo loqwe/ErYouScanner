@@ -1,7 +1,3 @@
-## 二改说明
-
-基于 [DSVVA/MHY_Scanner](https://github.com/DSVVA/MHY_Scanner) 二次修改。
-
 ## 新增功能
 
 - 米哈游短信登录支持极验 v4 人机验证。

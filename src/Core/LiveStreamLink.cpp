@@ -1,4 +1,4 @@
-﻿#include "LiveStreamLink.h"
+#include "LiveStreamLink.h"
 
 #include <format>
 #include <fstream>
@@ -10,6 +10,9 @@
 
 #include <nlohmann/json.hpp>
 #include <cpr/cpr.h>
+#include <mutex>
+#include <vector>
+#include "ScannerLog.hpp"
 
 namespace
 {
@@ -81,6 +84,118 @@ std::string BuildBiliStreamUrl(const nlohmann::json& codec)
         }
     }
     return "";
+}
+
+std::string NormalizeDouyinRoomID(std::string value)
+{
+    value = Trim(std::move(value));
+    if (value.empty()) return value;
+
+    std::smatch match;
+    const std::regex shortUrlPattern(R"(https?://v\.douyin\.com/[a-zA-Z0-9]+)", std::regex::icase);
+    if (std::regex_search(value, match, shortUrlPattern))
+    {
+        std::string shortUrl = match[0].str();
+        auto redirectResp = cpr::Get(
+            cpr::Url{ shortUrl },
+            cpr::Header{ { "User-Agent", kBiliUserAgent } },
+            cpr::Redirect{ true },
+            cpr::Timeout{ 5000 },
+            cpr::ConnectTimeout{ 3000 }
+        );
+        if (!redirectResp.url.str().empty())
+        {
+            value = redirectResp.url.str();
+        }
+    }
+
+    const std::regex liveUrlPattern(R"(live\.douyin\.com/([a-zA-Z0-9_]+))", std::regex::icase);
+    if (std::regex_search(value, match, liveUrlPattern) && match.size() > 1)
+    {
+        return match[1].str();
+    }
+
+    const std::regex queryPattern(R"((?:[?&](?:web_rid|room_id|id)=)([a-zA-Z0-9_]+))", std::regex::icase);
+    if (std::regex_search(value, match, queryPattern) && match.size() > 1)
+    {
+        return match[1].str();
+    }
+
+    size_t qPos = value.find('?');
+    if (qPos != std::string::npos)
+    {
+        value = value.substr(0, qPos);
+    }
+    while (!value.empty() && (value.back() == '/' || value.back() == '\\'))
+    {
+        value.pop_back();
+    }
+    size_t slashPos = value.find_last_of("/\\");
+    if (slashPos != std::string::npos)
+    {
+        value = value.substr(slashPos + 1);
+    }
+
+    return value;
+}
+
+std::string s_douyinTtwid;
+std::mutex s_douyinTtwidMutex;
+
+std::string FetchDouyinTtwid(const std::string& roomID)
+{
+    std::string targetUrl = roomID.empty()
+        ? "https://live.douyin.com/"
+        : std::format("https://live.douyin.com/{}", roomID);
+
+    auto resp = cpr::Get(
+        cpr::Url{ targetUrl },
+        cpr::Header{
+            { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+            { "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" },
+            { "Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8" }
+        },
+        cpr::Timeout{ 5000 },
+        cpr::ConnectTimeout{ 3000 }
+    );
+
+    std::smatch match;
+    const std::regex ttwidRegex(R"(ttwid=([^;\s]+))", std::regex::icase);
+    if (std::regex_search(resp.raw_header, match, ttwidRegex) && match.size() > 1)
+    {
+        return match[1].str();
+    }
+
+    for (const auto& [k, v] : resp.header)
+    {
+        if (std::regex_search(v, match, ttwidRegex) && match.size() > 1)
+        {
+            return match[1].str();
+        }
+    }
+
+    return "";
+}
+
+std::string GetOrRefreshDouyinTtwid(const std::string& roomID, bool forceRefresh)
+{
+    std::lock_guard lock(s_douyinTtwidMutex);
+    if (!forceRefresh && !s_douyinTtwid.empty())
+    {
+        return s_douyinTtwid;
+    }
+
+    std::string ttwid = FetchDouyinTtwid(roomID);
+    if (!ttwid.empty())
+    {
+        s_douyinTtwid = ttwid;
+        WriteScannerLog("douyin: fetched new ttwid successfully");
+    }
+    else
+    {
+        WriteScannerLog("douyin: failed to fetch ttwid");
+    }
+    return s_douyinTtwid;
 }
 }
 
@@ -251,62 +366,119 @@ std::string LiveBili::GetStreamUrl(const cpr::Parameters param)
 }
 
 LiveDouyin::LiveDouyin(const std::string& roomID) :
-    m_roomID(roomID)
+    m_roomID(NormalizeDouyinRoomID(roomID))
 {
 }
 
 LiveStreamInfo LiveDouyin::GetLiveStreamInfo()
 {
-    try
+    if (m_roomID.empty())
     {
-        // 构建请求参数
-        std::string user_agent =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36";
+        WriteScannerLog("douyin: empty roomID");
+        return { LiveStreamStatus::Absent, "" };
+    }
 
-        const cpr::Header headers = {
+    auto fetchInfo = [this](bool forceRefreshCookie) -> std::pair<cpr::Response, std::string> {
+        std::string ttwid = GetOrRefreshDouyinTtwid(m_roomID, forceRefreshCookie);
+
+        const std::string user_agent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+        cpr::Header headers = {
             { "User-Agent", user_agent },
-            { "referer", "https://live.douyin.com/" },
+            { "Referer", "https://live.douyin.com/" },
+            { "Accept", "application/json, text/plain, */*" },
+            { "Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8" }
         };
+        if (!ttwid.empty())
+        {
+            headers.emplace("Cookie", "ttwid=" + ttwid);
+        }
+
         std::string params =
             "aid=6383&app_name=douyin_web&live_id=1&device_platform=web&"
             "browser_language=zh-CN&browser_platform=Win32&browser_name=Edge&"
             "browser_version=139.0.0.0&is_need_double_stream=false&web_rid=" +
             m_roomID;
         const std::string url = std::string(api::live::douyin::room) + params;
-        auto response = cpr::Get(cpr::Url{ url }, headers);
+
+        auto response = cpr::Get(cpr::Url{ url }, headers, cpr::Timeout{ 6000 }, cpr::ConnectTimeout{ 4000 });
+        return { response, ttwid };
+    };
+
+    try
+    {
+        auto [response, ttwid] = fetchInfo(false);
+
+        // 如果没有 cookie 或者返回空（被抖音风控拦截），强制刷新 cookie 重试一次
         if (response.error || response.status_code != 200 || response.text.empty())
         {
+            WriteScannerLog(std::format("douyin: initial request status={} empty={}, retrying with fresh cookie",
+                response.status_code, response.text.empty()));
+            std::tie(response, ttwid) = fetchInfo(true);
+        }
+
+        if (response.error || response.status_code != 200 || response.text.empty())
+        {
+            WriteScannerLog(std::format("douyin: request failed after retry status={} empty={}",
+                response.status_code, response.text.empty()));
             return { LiveStreamStatus::Error, "" };
         }
-        auto streamInfo = nlohmann::json::parse(response.text);
-        int status_code = streamInfo["status_code"].get<int>();
+
+        auto streamInfo = nlohmann::json::parse(response.text, nullptr, false);
+        if (streamInfo.is_discarded())
+        {
+            WriteScannerLog("douyin: json parse failed");
+            return { LiveStreamStatus::Error, "" };
+        }
+
+        int status_code = streamInfo.value("status_code", -1);
         if (status_code != 0)
         {
+            WriteScannerLog(std::format("douyin: api status_code={}", status_code));
             return { LiveStreamStatus::Absent, "" };
         }
-        // 获取直播数据
-        const auto& data = streamInfo["data"]["data"][0];
-        int status = data["status"].get<int>();
+
+        const auto& dataArr = streamInfo["data"]["data"];
+        if (!dataArr.is_array() || dataArr.empty())
+        {
+            WriteScannerLog("douyin: room data array empty");
+            return { LiveStreamStatus::Absent, "" };
+        }
+
+        const auto& data = dataArr[0];
+        int status = data.value("status", 4);
         // 抖音 status == 2 代表是开播的状态
         if (status == 2)
         {
             std::string link = GetStreamLinkFromResponse(data);
             if (link.empty())
             {
+                WriteScannerLog("douyin: stream link extraction empty");
                 return { LiveStreamStatus::Error, "" };
             }
+            WriteScannerLog("douyin: stream link retrieved successfully");
             return { LiveStreamStatus::Normal, link };
         }
         // status == 4 代表未开播
         else if (status == 4)
         {
+            WriteScannerLog("douyin: room is not live (status=4)");
             return { LiveStreamStatus::NotLive, "" };
         }
+
+        WriteScannerLog(std::format("douyin: unknown room status={}", status));
+        return { LiveStreamStatus::Error, "" };
+    }
+    catch (const std::exception& e)
+    {
+        WriteScannerLog(std::format("douyin: exception in GetLiveStreamInfo: {}", e.what()));
         return { LiveStreamStatus::Error, "" };
     }
     catch (...)
     {
+        WriteScannerLog("douyin: unknown exception in GetLiveStreamInfo");
         return { LiveStreamStatus::Error, "" };
     }
 }
@@ -315,27 +487,117 @@ std::string LiveDouyin::GetStreamLinkFromResponse(const nlohmann::json& data)
 {
     try
     {
+        if (!data.contains("stream_url") || !data["stream_url"].is_object())
+        {
+            return "";
+        }
         const auto& stream_url = data["stream_url"];
 
-        if (stream_url.contains("pull_datas"))
+        // 策略1：优先从 live_core_sdk_data 解析不同清晰度的流 (origin -> uhd -> hd -> sd -> ld)
+        if (stream_url.contains("live_core_sdk_data") && stream_url["live_core_sdk_data"].is_object())
+        {
+            const auto& sdk_data = stream_url["live_core_sdk_data"];
+            if (sdk_data.contains("pull_data") && sdk_data["pull_data"].contains("stream_data"))
+            {
+                std::string stream_data_str = sdk_data["pull_data"]["stream_data"].get<std::string>();
+                auto streamData = nlohmann::json::parse(stream_data_str, nullptr, false);
+                if (!streamData.is_discarded() && streamData.contains("data") && streamData["data"].is_object())
+                {
+                    const auto& resolutions = streamData["data"];
+                    const std::vector<std::string> preferredQualities = { "origin", "uhd", "hd", "sd", "ld", "md" };
+                    for (const auto& quality : preferredQualities)
+                    {
+                        if (resolutions.contains(quality) && resolutions[quality].contains("main"))
+                        {
+                            const auto& mainObj = resolutions[quality]["main"];
+                            if (mainObj.contains("flv") && mainObj["flv"].is_string())
+                            {
+                                std::string flvUrl = mainObj["flv"].get<std::string>();
+                                if (!flvUrl.empty()) return flvUrl;
+                            }
+                        }
+                    }
+                    for (auto it = resolutions.begin(); it != resolutions.end(); ++it)
+                    {
+                        if (it.value().contains("main") && it.value()["main"].contains("flv") && it.value()["main"]["flv"].is_string())
+                        {
+                            std::string flvUrl = it.value()["main"]["flv"].get<std::string>();
+                            if (!flvUrl.empty()) return flvUrl;
+                        }
+                    }
+                    for (const auto& quality : preferredQualities)
+                    {
+                        if (resolutions.contains(quality) && resolutions[quality].contains("main"))
+                        {
+                            const auto& mainObj = resolutions[quality]["main"];
+                            if (mainObj.contains("hls") && mainObj["hls"].is_string())
+                            {
+                                std::string hlsUrl = mainObj["hls"].get<std::string>();
+                                if (!hlsUrl.empty()) return hlsUrl;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 策略2：从 pull_datas 解析 (如果是双屏直播)
+        if (stream_url.contains("pull_datas") && stream_url["pull_datas"].is_object())
         {
             const auto& pullDatas = stream_url["pull_datas"];
             if (!pullDatas.empty())
             {
                 auto doubleScreenStreams = pullDatas.begin().value();
-                std::string stream_data_str = doubleScreenStreams["stream_data"].get<std::string>();
-                auto streamData = nlohmann::json::parse(stream_data_str);
-
-                return streamData["data"]["origin"]["main"]["flv"].get<std::string>();
+                if (doubleScreenStreams.contains("stream_data"))
+                {
+                    std::string stream_data_str = doubleScreenStreams["stream_data"].get<std::string>();
+                    auto streamData = nlohmann::json::parse(stream_data_str, nullptr, false);
+                    if (!streamData.is_discarded() && streamData.contains("data"))
+                    {
+                        const auto& resData = streamData["data"];
+                        if (resData.contains("origin") && resData["origin"].contains("main") && resData["origin"]["main"].contains("flv"))
+                        {
+                            std::string flvUrl = resData["origin"]["main"]["flv"].get<std::string>();
+                            if (!flvUrl.empty()) return flvUrl;
+                        }
+                    }
+                }
             }
         }
-        if (stream_url.contains("live_core_sdk_data"))
-        {
-            std::string stream_data_str =
-                stream_url["live_core_sdk_data"]["pull_data"]["stream_data"].get<std::string>();
-            auto streamData = nlohmann::json::parse(stream_data_str);
 
-            return streamData["data"]["origin"]["main"]["flv"].get<std::string>();
+        // 策略3：直接从 flv_pull_url 读取 (例如 FULL_HD1, HD1, SD1)
+        if (stream_url.contains("flv_pull_url") && stream_url["flv_pull_url"].is_object())
+        {
+            const auto& flvMap = stream_url["flv_pull_url"];
+            const std::vector<std::string> keys = { "FULL_HD1", "HD1", "SD1", "SD2" };
+            for (const auto& k : keys)
+            {
+                if (flvMap.contains(k) && flvMap[k].is_string())
+                {
+                    std::string url = flvMap[k].get<std::string>();
+                    if (!url.empty()) return url;
+                }
+            }
+            for (auto it = flvMap.begin(); it != flvMap.end(); ++it)
+            {
+                if (it.value().is_string() && !it.value().get<std::string>().empty())
+                {
+                    return it.value().get<std::string>();
+                }
+            }
+        }
+
+        // 策略4：从 hls_pull_url_map 读取
+        if (stream_url.contains("hls_pull_url_map") && stream_url["hls_pull_url_map"].is_object())
+        {
+            const auto& hlsMap = stream_url["hls_pull_url_map"];
+            for (auto it = hlsMap.begin(); it != hlsMap.end(); ++it)
+            {
+                if (it.value().is_string() && !it.value().get<std::string>().empty())
+                {
+                    return it.value().get<std::string>();
+                }
+            }
         }
 
         return "";

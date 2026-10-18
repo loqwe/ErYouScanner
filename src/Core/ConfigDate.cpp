@@ -111,7 +111,7 @@ std::string ConfigDate::readConfigFile(const std::string& filePath)
 
 std::string ConfigDate::defaultConfig()
 {
-    const static char* defaultConfig = R"({"auto_exit": false,"auto_login":false,"auto_start": false,"confirm_delay_seconds":0,"scan_interval_ms":200,"account":[],"last_account":0,"live_room_id":"","live_room_ids":[],"num":0})";
+    const static char* defaultConfig = R"({"auto_exit": false,"auto_login":false,"auto_start": false,"confirm_delay_seconds":0,"scan_interval_ms":200,"account":[],"last_account":0,"live_room_id":"","live_room_items":[],"num":0})";
     updateConfig(defaultConfig);
     return getConfig();
 }

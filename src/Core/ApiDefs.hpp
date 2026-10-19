@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <string_view>
 
@@ -149,7 +149,8 @@ namespace bili
 {
 constexpr compile_string base{ "https://api.live.bilibili.com" };
 constexpr auto room_init = base + compile_string{ "/room/v1/Room/room_init" };
-// constexpr auto v1_play_url = base + compile_string{ "/xlive/web-room/v1/playUrl/playUrl" }; // 弃用
+constexpr auto room_info = base + compile_string{ "/room/v1/Room/get_info" };
+constexpr auto anchor_info = base + compile_string{ "/live_user/v1/UserInfo/get_anchor_in_room" };
 constexpr auto v2_play_info = base + compile_string{ "/xlive/web-room/v2/index/getRoomPlayInfo" };
 }
 

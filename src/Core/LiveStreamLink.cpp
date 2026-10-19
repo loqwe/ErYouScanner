@@ -32,10 +32,13 @@ std::string Trim(std::string value)
     }
     return value;
 }
+} // namespace
 
 std::string NormalizeBiliRoomID(std::string value)
 {
     value = Trim(std::move(value));
+    if (value.empty()) return "";
+
     std::smatch match;
     const std::regex liveUrlPattern(R"(live\.bilibili\.com/(?:blanc/)?(\d+))", std::regex::icase);
     if (std::regex_search(value, match, liveUrlPattern) && match.size() > 1)
@@ -47,9 +50,23 @@ std::string NormalizeBiliRoomID(std::string value)
     {
         return match[1].str();
     }
+    if (value.find("http://") != std::string::npos ||
+        value.find("https://") != std::string::npos ||
+        value.find("bilibili.com") != std::string::npos ||
+        value.find('/') != std::string::npos ||
+        value.find('?') != std::string::npos)
+    {
+        return "";
+    }
+    if (!std::all_of(value.begin(), value.end(), ::isdigit))
+    {
+        return "";
+    }
     return value;
 }
 
+namespace
+{
 cpr::Header BiliHeaders(const std::string& roomID)
 {
     const std::string referer = roomID.empty()
@@ -85,6 +102,7 @@ std::string BuildBiliStreamUrl(const nlohmann::json& codec)
     }
     return "";
 }
+} // namespace
 
 std::string NormalizeDouyinRoomID(std::string value)
 {
@@ -136,9 +154,22 @@ std::string NormalizeDouyinRoomID(std::string value)
         value = value.substr(slashPos + 1);
     }
 
+    if (value.find("douyin.com") != std::string::npos ||
+        value.find("http://") != std::string::npos ||
+        value.find("https://") != std::string::npos ||
+        value.find('/') != std::string::npos ||
+        value.find('?') != std::string::npos ||
+        value.find('.') != std::string::npos ||
+        value.find(':') != std::string::npos)
+    {
+        return "";
+    }
+
     return value;
 }
 
+namespace
+{
 std::string s_douyinTtwid;
 std::mutex s_douyinTtwidMutex;
 
@@ -232,22 +263,95 @@ LiveStreamInfo LiveBili::GetLiveStreamInfo()
         }
         const auto& data = roomInfo["data"];
         int liveStatus = data["live_status"].get<int>();
-        if (liveStatus != 1)
-        {
-            return { LiveStreamStatus::NotLive, "" };
-        }
         // 更新真实房间ID
         if (data.contains("room_id"))
         {
             realRoomID = std::to_string(data["room_id"].get<long long>());
         }
 
+        std::string title;
+        std::string anchorName;
+        std::string avatarUrl;
+
+        // 获取主播昵称和头像
+        const std::string queryId = realRoomID.empty() ? roomID : realRoomID;
+        auto anchorResp = cpr::Get(
+            cpr::Url{ std::format("{}?roomid={}", api::live::bili::anchor_info.c_str(), queryId) },
+            BiliHeaders(queryId),
+            cpr::Timeout{ 4000 });
+        if (!anchorResp.error && anchorResp.status_code == 200 && !anchorResp.text.empty())
+        {
+            try
+            {
+                auto anchorJson = nlohmann::json::parse(anchorResp.text, nullptr, false);
+                if (!anchorJson.is_discarded() && anchorJson.value("code", -1) == 0)
+                {
+                    const auto& info = anchorJson["data"]["info"];
+                    if (info.is_object())
+                    {
+                        anchorName = info.value("uname", "");
+                        std::string face = info.value("face", "");
+                        if (face.rfind("//", 0) == 0) face = "https:" + face;
+                        avatarUrl = face;
+                    }
+                }
+            }
+            catch (...) {}
+        }
+
+        // 获取直播间标题
+        auto roomResp = cpr::Get(
+            cpr::Url{ std::format("{}?room_id={}", api::live::bili::room_info.c_str(), queryId) },
+            BiliHeaders(queryId),
+            cpr::Timeout{ 4000 });
+        if (!roomResp.error && roomResp.status_code == 200 && !roomResp.text.empty())
+        {
+            try
+            {
+                auto roomJson = nlohmann::json::parse(roomResp.text, nullptr, false);
+                if (!roomJson.is_discarded() && roomJson.value("code", -1) == 0)
+                {
+                    const auto& d = roomJson["data"];
+                    if (d.is_object())
+                    {
+                        title = d.value("title", "");
+                    }
+                }
+            }
+            catch (...) {}
+        }
+
+        if (liveStatus != 1)
+        {
+            LiveStreamInfo res;
+            res.status = LiveStreamStatus::NotLive;
+            res.roomID = queryId;
+            res.title = title;
+            res.anchorName = anchorName;
+            res.avatarUrl = avatarUrl;
+            return res;
+        }
+
         std::string link = GetLinkByRealRoomID(realRoomID);
         if (link.empty())
         {
-            return { LiveStreamStatus::Error, "" };
+            LiveStreamInfo res;
+            res.status = LiveStreamStatus::Error;
+            res.roomID = queryId;
+            res.title = title;
+            res.anchorName = anchorName;
+            res.avatarUrl = avatarUrl;
+            return res;
         }
-        return { LiveStreamStatus::Normal, link };
+
+        LiveStreamInfo res;
+        res.status = LiveStreamStatus::Normal;
+        res.link = link;
+        res.roomID = queryId;
+        res.title = title;
+        res.anchorName = anchorName;
+        res.avatarUrl = avatarUrl;
+        return res;
     }
     catch (const nlohmann::json::exception& e)
     {
@@ -448,6 +552,22 @@ LiveStreamInfo LiveDouyin::GetLiveStreamInfo()
         }
 
         const auto& data = dataArr[0];
+        std::string title = data.value("title", "");
+        std::string anchorName;
+        std::string avatarUrl;
+        if (data.contains("owner") && data["owner"].is_object())
+        {
+            anchorName = data["owner"].value("nickname", "");
+            if (data["owner"].contains("avatar_thumb") && data["owner"]["avatar_thumb"].is_object())
+            {
+                const auto& urls = data["owner"]["avatar_thumb"]["url_list"];
+                if (urls.is_array() && !urls.empty() && urls[0].is_string())
+                {
+                    avatarUrl = urls[0].get<std::string>();
+                }
+            }
+        }
+
         int status = data.value("status", 4);
         // 抖音 status == 2 代表是开播的状态
         if (status == 2)
@@ -456,20 +576,20 @@ LiveStreamInfo LiveDouyin::GetLiveStreamInfo()
             if (link.empty())
             {
                 WriteScannerLog("douyin: stream link extraction empty");
-                return { LiveStreamStatus::Error, "" };
+                return { LiveStreamStatus::Error, "", m_roomID, title, anchorName, avatarUrl };
             }
             WriteScannerLog("douyin: stream link retrieved successfully");
-            return { LiveStreamStatus::Normal, link };
+            return { LiveStreamStatus::Normal, link, m_roomID, title, anchorName, avatarUrl };
         }
         // status == 4 代表未开播
         else if (status == 4)
         {
             WriteScannerLog("douyin: room is not live (status=4)");
-            return { LiveStreamStatus::NotLive, "" };
+            return { LiveStreamStatus::NotLive, "", m_roomID, title, anchorName, avatarUrl };
         }
 
         WriteScannerLog(std::format("douyin: unknown room status={}", status));
-        return { LiveStreamStatus::Error, "" };
+        return { LiveStreamStatus::Error, "", m_roomID, title, anchorName, avatarUrl };
     }
     catch (const std::exception& e)
     {
@@ -619,4 +739,71 @@ LiveStreamInfo GetLiveInfo(const LivePlatform platform, const std::string& roomI
     default:
         return LiveStreamInfo{ LiveStreamStatus::Error };
     }
+}
+
+LiveStreamInfo FetchLiveRoomDetail(const LivePlatform platform, const std::string& roomID)
+{
+    if (platform == LivePlatform::Douyin)
+    {
+        return GetLiveInfo<LiveDouyin>(roomID);
+    }
+    else if (platform == LivePlatform::BiliBili)
+    {
+        const std::string normalizedId = NormalizeBiliRoomID(roomID);
+        LiveStreamInfo res;
+        res.roomID = normalizedId;
+        res.status = LiveStreamStatus::Error;
+        if (normalizedId.empty()) return res;
+
+        try
+        {
+            // 1. 获取主播昵称和头像
+            auto anchorResp = cpr::Get(
+                cpr::Url{ std::format("{}?roomid={}", api::live::bili::anchor_info.c_str(), normalizedId) },
+                BiliHeaders(normalizedId),
+                cpr::Timeout{ 4000 });
+            if (!anchorResp.error && anchorResp.status_code == 200 && !anchorResp.text.empty())
+            {
+                auto anchorJson = nlohmann::json::parse(anchorResp.text, nullptr, false);
+                if (!anchorJson.is_discarded() && anchorJson.value("code", -1) == 0)
+                {
+                    const auto& info = anchorJson["data"]["info"];
+                    if (info.is_object())
+                    {
+                        res.anchorName = info.value("uname", "");
+                        std::string face = info.value("face", "");
+                        if (face.rfind("//", 0) == 0) face = "https:" + face;
+                        res.avatarUrl = face;
+                    }
+                }
+            }
+
+            // 2. 获取房间信息、真实房间ID、标题与开播状态
+            auto roomResp = cpr::Get(
+                cpr::Url{ std::format("{}?room_id={}", api::live::bili::room_info.c_str(), normalizedId) },
+                BiliHeaders(normalizedId),
+                cpr::Timeout{ 4000 });
+            if (!roomResp.error && roomResp.status_code == 200 && !roomResp.text.empty())
+            {
+                auto roomJson = nlohmann::json::parse(roomResp.text, nullptr, false);
+                if (!roomJson.is_discarded() && roomJson.value("code", -1) == 0)
+                {
+                    const auto& d = roomJson["data"];
+                    if (d.is_object())
+                    {
+                        res.title = d.value("title", "");
+                        int liveStatus = d.value("live_status", 0);
+                        res.status = (liveStatus == 1) ? LiveStreamStatus::Normal : LiveStreamStatus::NotLive;
+                        if (d.contains("room_id"))
+                        {
+                            res.roomID = std::to_string(d["room_id"].get<long long>());
+                        }
+                    }
+                }
+            }
+        }
+        catch (...) {}
+        return res;
+    }
+    return LiveStreamInfo{ LiveStreamStatus::Error };
 }

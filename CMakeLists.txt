@@ -76,6 +76,8 @@ add_executable(${PROJECT_NAME}
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowAbout.h" 
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowMain.cpp" 
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowMain.h" 
+	"${CMAKE_SOURCE_DIR}/src/UI/LiveRoomItemDelegate.h"
+	"${CMAKE_SOURCE_DIR}/src/UI/LiveRoomItemDelegate.cpp"
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowLogin.h"
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowLogin.cpp" 
 	"${CMAKE_SOURCE_DIR}/src/UI/WindowLoginKuro.h"

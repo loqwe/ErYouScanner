@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <string>
 #include <nlohmann/json.hpp>
@@ -21,14 +21,18 @@ enum class LiveStreamStatus : uint8_t
 
 enum class LivePlatform
 {
-    Douyin = 0,
-    BiliBili = 1
+    Douyin = 1,
+    BiliBili = 2
 };
 
 struct LiveStreamInfo
 {
-    LiveStreamStatus status;
+    LiveStreamStatus status{ LiveStreamStatus::Error };
     std::string link;
+    std::string roomID;
+    std::string title;
+    std::string anchorName;
+    std::string avatarUrl;
 };
 
 class LiveBili
@@ -63,3 +67,6 @@ LiveStreamInfo GetLiveInfo(const std::string& roomID)
 }
 
 LiveStreamInfo GetLiveInfo(const LivePlatform platform, const std::string& roomID);
+LiveStreamInfo FetchLiveRoomDetail(const LivePlatform platform, const std::string& roomID);
+std::string NormalizeBiliRoomID(std::string value);
+std::string NormalizeDouyinRoomID(std::string value);

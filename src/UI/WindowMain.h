@@ -16,6 +16,7 @@
 #include "WindowLogin.h"
 #include "WindowAbout.h"
 #include "ConfirmationDelay.hpp"
+#include "LiveRoomItemDelegate.h"
 
 class configInitLoad :
     public QThread
@@ -109,8 +110,28 @@ private:
     void onAccountReauthenticated(const nlohmann::json& identity, const std::string& name,
         const std::string& token, const std::string& uid, const std::string& mid, const std::string& type);
     QPointer<QWidget> accountLoginDialog;
+    LiveRoomItemDelegate* liveRoomDelegate{ nullptr };
+    QWidget* liveRoomInfoCard{ nullptr };
+    QLabel* labelCardAvatar{ nullptr };
+    QLabel* labelCardPlatform{ nullptr };
+    QLabel* labelCardAnchor{ nullptr };
+    QLabel* labelCardSep{ nullptr };
+    QLabel* labelCardTitle{ nullptr };
+    QLabel* labelCardStatus{ nullptr };
+    static LivePlatform comboBoxToLivePlatform(int comboIndex)
+    {
+        return (comboIndex == 1) ? LivePlatform::BiliBili : LivePlatform::Douyin;
+    }
+    static int livePlatformToComboBox(int platform)
+    {
+        return (platform == static_cast<int>(LivePlatform::BiliBili)) ? 1 : 0;
+    }
+    void initLiveRoomInfoCard();
+    void updateCurrentRoomCard();
     void refreshLiveRoomIds();
-    void saveLiveRoomId(const QString& roomId);
+    void saveLiveRoomId(const QString& roomId, const LiveStreamInfo* fetchedInfo = nullptr);
+    void removeLiveRoomHistory(int row);
+    void startLiveRoomStatusCheck();
     void startAccountSelfCheck();
     void setAccountCheckStatus(int row, bool valid, const QString& status);
     QFrame* pillContainer{ nullptr };

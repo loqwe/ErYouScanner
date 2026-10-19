@@ -22,6 +22,7 @@
 #include <QUuid>
 #include <QTimer>
 #include <QFormLayout>
+#include <QPainterPath>
 
 #include "MhyApi.hpp"
 #include "ScannerTask.hpp"
@@ -29,6 +30,111 @@
 #include "WindowLoginKuro.h"
 #include "KuroScanSmsDialog.hpp"
 #include "AccountPlatform.hpp"
+#include <opencv2/opencv.hpp>
+
+namespace
+{
+QIcon makeClearButtonIcon()
+{
+    const int sz = 32;
+    QPixmap normalPix(sz, sz);
+    normalPix.fill(Qt::transparent);
+    {
+        QPainter p(&normalPix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(QColor(0, 0, 0, 15));
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(2, 2, sz - 4, sz - 4);
+        p.setPen(QPen(QColor("#94a3b8"), 2.2));
+        const int offset = 10;
+        p.drawLine(offset, offset, sz - offset, sz - offset);
+        p.drawLine(sz - offset, offset, offset, sz - offset);
+    }
+
+    QPixmap hoverPix(sz, sz);
+    hoverPix.fill(Qt::transparent);
+    {
+        QPainter p(&hoverPix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(QColor("#fee2e2"));
+        p.setPen(QPen(QColor("#fca5a5"), 1.2));
+        p.drawEllipse(2, 2, sz - 4, sz - 4);
+        p.setPen(QPen(QColor("#dc2626"), 2.4));
+        const int offset = 10;
+        p.drawLine(offset, offset, sz - offset, sz - offset);
+        p.drawLine(sz - offset, offset, offset, sz - offset);
+    }
+
+    QIcon icon;
+    icon.addPixmap(normalPix, QIcon::Normal);
+    icon.addPixmap(hoverPix, QIcon::Active);
+    icon.addPixmap(hoverPix, QIcon::Selected);
+    return icon;
+}
+
+void preloadAvatar(int platform, const QString& roomId, const QString& avatarUrl, std::function<void()> onDone = nullptr)
+{
+    if (avatarUrl.isEmpty() || roomId.isEmpty()) return;
+    const QString cacheKey = QStringLiteral("%1_%2").arg(platform).arg(roomId);
+    const QString pngPath = QStringLiteral("Config/cache/avatar/") + cacheKey + QStringLiteral(".png");
+    if (QFile::exists(pngPath))
+    {
+        return;
+    }
+
+    QThreadPool::globalInstance()->start([platform, roomId, avatarUrl, cacheKey, pngPath, onDone = std::move(onDone)]() {
+        QDir().mkpath(QStringLiteral("Config/cache/avatar/"));
+        std::string reqUrl = avatarUrl.trimmed().toStdString();
+        if (reqUrl.rfind("//", 0) == 0)
+        {
+            reqUrl = "https:" + reqUrl;
+        }
+
+        std::string referer = "https://live.bilibili.com/";
+        if (reqUrl.find("douyin") != std::string::npos || reqUrl.find("byted") != std::string::npos)
+        {
+            referer = "https://live.douyin.com/";
+        }
+
+        auto r = cpr::Get(
+            cpr::Url{ reqUrl },
+            cpr::VerifySsl{ false },
+            cpr::Timeout{ 8000 },
+            cpr::ConnectTimeout{ 5000 },
+            cpr::Header{
+                { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+                { "Referer", referer }
+            });
+        if (!r.error && r.status_code == 200 && !r.text.empty())
+        {
+            QImage img;
+            if (!img.loadFromData(reinterpret_cast<const uchar*>(r.text.data()), static_cast<int>(r.text.size())))
+            {
+                std::vector<uchar> buf(r.text.begin(), r.text.end());
+                cv::Mat mat = cv::imdecode(buf, cv::IMREAD_COLOR);
+                if (!mat.empty())
+                {
+                    img = QImage(mat.data, mat.cols, mat.rows, static_cast<int>(mat.step), QImage::Format_BGR888).copy();
+                }
+            }
+
+            if (!img.isNull())
+            {
+                img.save(pngPath, "PNG");
+            }
+
+            if (onDone)
+            {
+                onDone();
+            }
+        }
+        else
+        {
+            WriteScannerLog(std::format("preloadAvatar: download failed code={}, err={}, url={}", r.status_code, r.error.message, reqUrl));
+        }
+    });
+}
+} // namespace
 
 WindowMain::WindowMain(QWidget* parent) :
     QMainWindow(parent),
@@ -69,8 +175,10 @@ WindowMain::WindowMain(QWidget* parent) :
         ui.pBtStream->setText("监视直播中");
         ui.pBtStream->setEnabled(true);
     });
-    connect(this, &WindowMain::LiveStreamLinkError, this, [&](LiveStreamStatus status) {
+    connect(this, &WindowMain::LiveStreamLinkError, this, [this](LiveStreamStatus status) {
+        pBtStop();
         liveIdError(status);
+        updateCurrentRoomCard();
     });
     connect(this, &WindowMain::AccountNotSelected, this, [&]() {
         QMessageBox::information(this, "提示", "没有选择任何账号", QMessageBox::Yes);
@@ -168,14 +276,73 @@ WindowMain::WindowMain(QWidget* parent) :
     ui.tableWidget->setEditTriggers(QAbstractItemView::DoubleClicked);
 
     ui.lineEditLiveId->setEditable(true);
+    liveRoomDelegate = new LiveRoomItemDelegate(ui.lineEditLiveId->view());
+    ui.lineEditLiveId->setItemDelegate(liveRoomDelegate);
+    connect(liveRoomDelegate, &LiveRoomItemDelegate::deleteItemRequested, this, &WindowMain::removeLiveRoomHistory);
+
+    ui.lineEditLiveId->setMaxVisibleItems(8);
+    ui.lineEditLiveId->view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    if (ui.lineEditLiveId->view() && ui.lineEditLiveId->view()->viewport())
+    {
+        ui.lineEditLiveId->view()->viewport()->installEventFilter(this);
+    }
+
+    // 下拉视图右键菜单删除
+    ui.lineEditLiveId->view()->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui.lineEditLiveId->view(), &QAbstractItemView::customContextMenuRequested, this, [this](const QPoint& pos) {
+        QModelIndex index = ui.lineEditLiveId->view()->indexAt(pos);
+        if (index.isValid())
+        {
+            QMenu menu(this);
+            QAction* delAction = menu.addAction(QStringLiteral("从历史记录中删除"));
+            connect(delAction, &QAction::triggered, this, [this, row = index.row()] {
+                removeLiveRoomHistory(row);
+            });
+            menu.exec(ui.lineEditLiveId->view()->viewport()->mapToGlobal(pos));
+        }
+    });
+
+    // 选中历史项自动联动切换平台
+    connect(ui.lineEditLiveId, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+        if (index >= 0)
+        {
+            const int platform = ui.lineEditLiveId->itemData(index, LiveRoomPlatformRole).toInt();
+            ui.comboBox->setCurrentIndex(livePlatformToComboBox(platform));
+            const QString roomId = ui.lineEditLiveId->itemData(index, LiveRoomIdRole).toString();
+            if (!roomId.isEmpty())
+            {
+                ui.lineEditLiveId->setEditText(roomId);
+            }
+        }
+    });
+
+    ui.lineEditLiveId->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     if (ui.lineEditLiveId->lineEdit())
     {
-        ui.lineEditLiveId->lineEdit()->setPlaceholderText("直播间ID或链接");
-        ui.lineEditLiveId->lineEdit()->setClearButtonEnabled(true);
-        connect(ui.lineEditLiveId->lineEdit(), &QLineEdit::editingFinished, this, [this]() {
+        auto* edit = ui.lineEditLiveId->lineEdit();
+        edit->setPlaceholderText("直播间ID或链接");
+        edit->setClearButtonEnabled(false); // 彻底关闭 Windows 原生黑圆圈白叉！
+        edit->setStyleSheet("QLineEdit { selection-background-color: #087e72; }");
+        auto* clearAction = edit->addAction(makeClearButtonIcon(), QLineEdit::TrailingPosition);
+        clearAction->setVisible(!edit->text().trimmed().isEmpty());
+        connect(clearAction, &QAction::triggered, edit, [edit]() {
+            edit->clear();
+        });
+        connect(edit, &QLineEdit::textChanged, clearAction, [clearAction](const QString& text) {
+            clearAction->setVisible(!text.trimmed().isEmpty());
+        });
+        connect(edit, &QLineEdit::editingFinished, this, [this]() {
             saveLiveRoomId(ui.lineEditLiveId->currentText());
         });
     }
+
+    initLiveRoomInfoCard();
+    connect(ui.lineEditLiveId, &QComboBox::currentTextChanged, this, [this](const QString&) {
+        updateCurrentRoomCard();
+    });
+    connect(ui.comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        updateCurrentRoomCard();
+    });
 
     ui.tableWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui.tableWidget, &QTableWidget::customContextMenuRequested, this, &WindowMain::onTableRightClicked);
@@ -224,6 +391,257 @@ void WindowMain::onTableRightClicked(const QPoint& pos)
     contextMenu.exec(ui.tableWidget->viewport()->mapToGlobal(pos));
 }
 
+void WindowMain::initLiveRoomInfoCard()
+{
+    liveRoomInfoCard = new QWidget(this);
+    liveRoomInfoCard->setObjectName(QStringLiteral("liveRoomInfoCard"));
+    liveRoomInfoCard->setFixedHeight(32);
+    liveRoomInfoCard->setStyleSheet(
+        "#liveRoomInfoCard {"
+        "  background: #f8fafc;"
+        "  border: 1px solid #e2e8f0;"
+        "  border-radius: 6px;"
+        "}"
+    );
+
+    auto* cardLayout = new QHBoxLayout(liveRoomInfoCard);
+    cardLayout->setContentsMargins(8, 4, 8, 4);
+    cardLayout->setSpacing(6);
+
+    labelCardAvatar = new QLabel(liveRoomInfoCard);
+    labelCardAvatar->setFixedSize(22, 22);
+
+    labelCardPlatform = new QLabel(liveRoomInfoCard);
+
+    labelCardAnchor = new QLabel(liveRoomInfoCard);
+    labelCardAnchor->setStyleSheet("font-weight: bold; font-size: 12px; color: #1e293b;");
+
+    labelCardSep = new QLabel("·", liveRoomInfoCard);
+    labelCardSep->setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 12px;");
+
+    labelCardTitle = new QLabel(liveRoomInfoCard);
+    labelCardTitle->setStyleSheet("color: #64748b; font-size: 11px;");
+    labelCardTitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    labelCardStatus = new QLabel(liveRoomInfoCard);
+
+    cardLayout->addWidget(labelCardAvatar);
+    cardLayout->addWidget(labelCardPlatform);
+    cardLayout->addWidget(labelCardAnchor);
+    cardLayout->addWidget(labelCardSep);
+    cardLayout->addWidget(labelCardTitle, 1);
+    cardLayout->addWidget(labelCardStatus);
+
+    auto* containerLayout = new QVBoxLayout();
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(4);
+
+    ui.settingsLayout->setAlignment(ui.labelLiveName, Qt::AlignTop);
+    ui.labelLiveName->setContentsMargins(0, 6, 0, 0);
+
+    ui.settingsLayout->removeWidget(ui.lineEditLiveId);
+    containerLayout->addWidget(ui.lineEditLiveId);
+    containerLayout->addWidget(liveRoomInfoCard);
+    ui.settingsLayout->addLayout(containerLayout, 1, 1, 1, 3);
+
+    liveRoomInfoCard->setVisible(true);
+}
+
+void WindowMain::updateCurrentRoomCard()
+{
+    if (!liveRoomInfoCard) return;
+
+    const QString text = ui.lineEditLiveId->currentText().trimmed();
+    const auto curPlatformEnum = comboBoxToLivePlatform(ui.comboBox->currentIndex());
+    const int curPlatform = static_cast<int>(curPlatformEnum);
+    const std::string rawStr = text.toStdString();
+    const std::string cleanId = (curPlatformEnum == LivePlatform::BiliBili)
+        ? NormalizeBiliRoomID(rawStr)
+        : NormalizeDouyinRoomID(rawStr);
+    const std::string queryId = cleanId.empty() ? rawStr : cleanId;
+
+    nlohmann::json matchedItem;
+    bool found = false;
+
+    if (!queryId.empty() && userinfo.is_object() &&
+        userinfo.contains("live_room_items") && userinfo["live_room_items"].is_array())
+    {
+        for (const auto& item : userinfo["live_room_items"])
+        {
+            if (item.is_object() &&
+                item.value("room_id", "") == queryId &&
+                item.value("platform", 0) == curPlatform)
+            {
+                matchedItem = item;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found)
+    {
+        // 占位态：卡片常驻占位，保持窗口几何尺寸稳定，绝不上下缩放抖动
+        labelCardPlatform->setVisible(false);
+        labelCardSep->setVisible(false);
+        labelCardTitle->setVisible(false);
+        labelCardStatus->setVisible(false);
+
+        // 占位圆底图标
+        const int avatarSize = 22;
+        QPixmap ph(avatarSize * 2, avatarSize * 2);
+        ph.fill(Qt::transparent);
+        {
+            QPainter p(&ph);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setBrush(QColor("#e2e8f0"));
+            p.setPen(Qt::NoPen);
+            p.drawEllipse(0, 0, avatarSize * 2, avatarSize * 2);
+        }
+        labelCardAvatar->setPixmap(ph.scaled(avatarSize, avatarSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        labelCardAvatar->setVisible(true);
+
+        labelCardAnchor->setText(text.isEmpty() ? QStringLiteral("未选择直播间") : QStringLiteral("暂无该直播间信息"));
+        labelCardAnchor->setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: normal;");
+        labelCardAnchor->setVisible(true);
+
+        if (!t2.isRunning() && !ui.pBtStream->isChecked())
+        {
+            ui.pBtStream->setEnabled(true);
+            ui.pBtStream->setToolTip(QString());
+        }
+        liveRoomInfoCard->setVisible(true);
+        return;
+    }
+
+    const QString anchorName = QString::fromStdString(matchedItem.value("anchor_name", ""));
+    const QString avatarUrl = QString::fromStdString(matchedItem.value("avatar_url", ""));
+    const QString title = QString::fromStdString(matchedItem.value("title", ""));
+    const bool isLive = matchedItem.value("is_live", false);
+    const int platform = matchedItem.value("platform", 0);
+
+    // 平台徽标
+    const bool isBili = (platform == static_cast<int>(LivePlatform::BiliBili));
+    if (isBili)
+    {
+        labelCardPlatform->setText(QStringLiteral("bilibili"));
+        labelCardPlatform->setStyleSheet("background: #e5f4fb; color: #00aeec; padding: 1px 5px; border-radius: 3px; font-size: 11px; font-weight: bold;");
+    }
+    else
+    {
+        labelCardPlatform->setText(QStringLiteral("抖音"));
+        labelCardPlatform->setStyleSheet("background: #fee7eb; color: #fe2c55; padding: 1px 5px; border-radius: 3px; font-size: 11px; font-weight: bold;");
+    }
+    labelCardPlatform->setVisible(true);
+
+    // 主播名称
+    labelCardAnchor->setText(anchorName.isEmpty() ? QStringLiteral("直播间 %1").arg(QString::fromStdString(matchedItem.value("room_id", ""))) : anchorName);
+    labelCardAnchor->setStyleSheet("font-weight: bold; font-size: 12px; color: #1e293b;");
+    labelCardAnchor->setVisible(true);
+
+    // 分隔符与标题
+    labelCardSep->setVisible(true);
+    QFontMetrics fmTitle(labelCardTitle->font());
+    labelCardTitle->setText(title.isEmpty() ? QStringLiteral("暂无标题") : fmTitle.elidedText(title, Qt::ElideRight, 260));
+    labelCardTitle->setVisible(true);
+
+    // 开播状态
+    if (isLive)
+    {
+        labelCardStatus->setText(QStringLiteral("● 直播中"));
+        labelCardStatus->setStyleSheet("background: #dcfce7; color: #16a34a; font-weight: bold; padding: 1px 6px; border-radius: 3px; font-size: 11px;");
+    }
+    else
+    {
+        labelCardStatus->setText(QStringLiteral("○ 未开播"));
+        labelCardStatus->setStyleSheet("background: #f1f5f9; color: #64748b; padding: 1px 6px; border-radius: 3px; font-size: 11px;");
+    }
+    labelCardStatus->setVisible(true);
+
+    // 根据开播状态控制“监视直播间”按钮启用状态
+    if (!t2.isRunning() && !ui.pBtStream->isChecked())
+    {
+        if (!isLive)
+        {
+            ui.pBtStream->setEnabled(false);
+            ui.pBtStream->setToolTip(QStringLiteral("当前直播间未开播，无法开启监视"));
+        }
+        else
+        {
+            ui.pBtStream->setEnabled(true);
+            ui.pBtStream->setToolTip(QString());
+        }
+    }
+
+    // 头像处理（圆形微缩头像）
+    const int avatarSize = 22;
+    QPixmap avatarPix(avatarSize * 2, avatarSize * 2);
+    avatarPix.fill(Qt::transparent);
+
+    bool hasDiskImage = false;
+    const QString cacheKey = QStringLiteral("%1_%2").arg(platform).arg(QString::fromStdString(queryId));
+    const QString pngPath = QStringLiteral("Config/cache/avatar/") + cacheKey + QStringLiteral(".png");
+
+    if (QFile::exists(pngPath))
+    {
+        QImage diskImg;
+        if (!diskImg.load(pngPath))
+        {
+            cv::Mat mat = cv::imread(pngPath.toLocal8Bit().toStdString(), cv::IMREAD_COLOR);
+            if (!mat.empty())
+            {
+                diskImg = QImage(mat.data, mat.cols, mat.rows, static_cast<int>(mat.step), QImage::Format_BGR888).copy();
+            }
+        }
+        if (!diskImg.isNull())
+        {
+            avatarPix = QPixmap::fromImage(diskImg.scaled(avatarSize * 2, avatarSize * 2, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+            hasDiskImage = true;
+        }
+    }
+    else if (!avatarUrl.isEmpty())
+    {
+        preloadAvatar(platform, QString::fromStdString(queryId), avatarUrl, [this]() {
+            QMetaObject::invokeMethod(this, [this]() {
+                updateCurrentRoomCard();
+            }, Qt::QueuedConnection);
+        });
+    }
+
+    QPixmap rounded(avatarSize * 2, avatarSize * 2);
+    rounded.fill(Qt::transparent);
+    {
+        QPainter p(&rounded);
+        p.setRenderHint(QPainter::Antialiasing);
+        QPainterPath path;
+        path.addEllipse(0, 0, avatarSize * 2, avatarSize * 2);
+        p.setClipPath(path);
+
+        if (hasDiskImage)
+        {
+            p.drawPixmap(0, 0, avatarPix);
+        }
+        else
+        {
+            const bool isBili = (platform == static_cast<int>(LivePlatform::BiliBili));
+            QColor bg = isBili ? QColor("#fb7299") : QColor("#242630");
+            p.setBrush(bg);
+            p.setPen(Qt::NoPen);
+            p.drawRect(0, 0, avatarSize * 2, avatarSize * 2);
+            p.setPen(Qt::white);
+            QFont f = p.font();
+            f.setBold(true);
+            f.setPixelSize(avatarSize);
+            p.setFont(f);
+            QString ch = anchorName.isEmpty() ? (isBili ? "B" : "抖") : anchorName.left(1);
+            p.drawText(rounded.rect(), Qt::AlignCenter, ch);
+        }
+    }
+    labelCardAvatar->setPixmap(rounded.scaled(avatarSize, avatarSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+    liveRoomInfoCard->setVisible(true);
+}
+
 void WindowMain::refreshLiveRoomIds()
 {
     const QString currentText = ui.lineEditLiveId->currentText().trimmed();
@@ -232,18 +650,126 @@ void WindowMain::refreshLiveRoomIds()
     ui.lineEditLiveId->blockSignals(true);
     ui.lineEditLiveId->clear();
 
-    if (userinfo.contains("live_room_ids") && userinfo["live_room_ids"].is_array())
+    if (!userinfo.is_object())
     {
-        for (const auto& item : userinfo["live_room_ids"])
+        try { userinfo = nlohmann::json::parse(m_config->getConfig()); } catch (...) {}
+    }
+
+
+    // 兼容迁移老版本数据：仅在不存在 live_room_items 字段时执行一次性迁移
+    bool configModified = false;
+    if (!userinfo.contains("live_room_items") || !userinfo["live_room_items"].is_array())
+    {
+        userinfo["live_room_items"] = nlohmann::json::array();
+        configModified = true;
+        const int defaultPlatform = (ui.comboBox->currentIndex() == 1)
+            ? static_cast<int>(LivePlatform::BiliBili)
+            : static_cast<int>(LivePlatform::Douyin);
+
+        std::vector<std::pair<std::string, int>> seedList;
+
+        if (userinfo.contains("live_room_ids") && userinfo["live_room_ids"].is_array())
         {
-            if (!item.is_string())
+            for (const auto& item : userinfo["live_room_ids"])
+            {
+                if (item.is_string())
+                {
+                    std::string raw = item.get<std::string>();
+                    int p = defaultPlatform;
+                    if (raw.find("bilibili.com") != std::string::npos) p = static_cast<int>(LivePlatform::BiliBili);
+                    else if (raw.find("douyin.com") != std::string::npos) p = static_cast<int>(LivePlatform::Douyin);
+
+                    std::string clean = (p == static_cast<int>(LivePlatform::BiliBili))
+                        ? NormalizeBiliRoomID(raw)
+                        : NormalizeDouyinRoomID(raw);
+                    if (!clean.empty())
+                    {
+                        seedList.push_back({ clean, p });
+                    }
+                }
+            }
+        }
+
+        if (seedList.empty() && userinfo.contains("live_room_id") && userinfo["live_room_id"].is_string())
+        {
+            std::string raw = userinfo["live_room_id"].get<std::string>();
+            int p = defaultPlatform;
+            if (raw.find("bilibili.com") != std::string::npos) p = static_cast<int>(LivePlatform::BiliBili);
+            else if (raw.find("douyin.com") != std::string::npos) p = static_cast<int>(LivePlatform::Douyin);
+
+            std::string clean = (p == static_cast<int>(LivePlatform::BiliBili))
+                ? NormalizeBiliRoomID(raw)
+                : NormalizeDouyinRoomID(raw);
+            if (!clean.empty())
+            {
+                seedList.push_back({ clean, p });
+            }
+        }
+
+        for (const auto& [cleanId, p] : seedList)
+        {
+            userinfo["live_room_items"].push_back({
+                { "room_id", cleanId },
+                { "platform", p },
+                { "anchor_name", "" },
+                { "avatar_url", "" },
+                { "title", "" },
+                { "is_live", false }
+            });
+        }
+    }
+
+    // 彻底清除旧版本遗留的 live_room_ids 字段，杜绝后续重复初始化
+    if (userinfo.contains("live_room_ids"))
+    {
+        userinfo.erase("live_room_ids");
+        configModified = true;
+    }
+
+    if (configModified)
+    {
+        m_config->updateConfig(userinfo.dump());
+    }
+
+    if (userinfo.contains("live_room_items") && userinfo["live_room_items"].is_array())
+    {
+        for (const auto& item : userinfo["live_room_items"])
+        {
+            if (!item.is_object())
             {
                 continue;
             }
-            const QString id = QString::fromStdString(item.get<std::string>()).trimmed();
-            if (!id.isEmpty() && ui.lineEditLiveId->findText(id) < 0)
+            const QString id = QString::fromStdString(item.value("room_id", "")).trimmed();
+            if (id.isEmpty())
             {
-                ui.lineEditLiveId->addItem(id);
+                continue;
+            }
+            const int platform = item.value("platform", 0);
+            const QString anchorName = QString::fromStdString(item.value("anchor_name", ""));
+            const QString avatarUrl = QString::fromStdString(item.value("avatar_url", ""));
+            const QString title = QString::fromStdString(item.value("title", ""));
+            const bool isLive = item.value("is_live", false);
+
+            ui.lineEditLiveId->addItem(id);
+            const int newIndex = ui.lineEditLiveId->count() - 1;
+            ui.lineEditLiveId->setItemData(newIndex, id, LiveRoomIdRole);
+            ui.lineEditLiveId->setItemData(newIndex, platform, LiveRoomPlatformRole);
+            ui.lineEditLiveId->setItemData(newIndex, anchorName, LiveRoomAnchorNameRole);
+            ui.lineEditLiveId->setItemData(newIndex, avatarUrl, LiveRoomAvatarUrlRole);
+            ui.lineEditLiveId->setItemData(newIndex, title, LiveRoomTitleRole);
+            ui.lineEditLiveId->setItemData(newIndex, isLive, LiveRoomIsLiveRole);
+
+            if (!avatarUrl.isEmpty())
+            {
+                preloadAvatar(platform, id, avatarUrl, [this]() {
+                    QMetaObject::invokeMethod(this, [this]() {
+                        if (ui.lineEditLiveId->view() && ui.lineEditLiveId->view()->viewport())
+                        {
+                            ui.lineEditLiveId->view()->viewport()->update();
+                        }
+                        updateCurrentRoomCard();
+                    }, Qt::QueuedConnection);
+                });
             }
         }
     }
@@ -263,9 +789,10 @@ void WindowMain::refreshLiveRoomIds()
     }
 
     ui.lineEditLiveId->blockSignals(false);
+    updateCurrentRoomCard();
 }
 
-void WindowMain::saveLiveRoomId(const QString& roomId)
+void WindowMain::saveLiveRoomId(const QString& roomId, const LiveStreamInfo* fetchedInfo)
 {
     const QString text = roomId.trimmed();
     if (text.isEmpty())
@@ -275,43 +802,219 @@ void WindowMain::saveLiveRoomId(const QString& roomId)
 
     try
     {
+        const auto platformEnum = comboBoxToLivePlatform(ui.comboBox->currentIndex());
+        const int platform = static_cast<int>(platformEnum);
+        const std::string rawStr = text.toStdString();
+        const std::string cleanId = (platformEnum == LivePlatform::BiliBili)
+            ? NormalizeBiliRoomID(rawStr)
+            : NormalizeDouyinRoomID(rawStr);
+
+        // 如果清洗出的房间号为空，说明是无效链接/无房间号链接，坚决不保存
+        if (cleanId.empty())
+        {
+            return;
+        }
+
         if (!userinfo.is_object())
         {
             userinfo = nlohmann::json::parse(m_config->getConfig());
         }
 
-        const std::string id = text.toStdString();
-        userinfo["live_room_id"] = id;
-        if (!userinfo.contains("live_room_ids") || !userinfo["live_room_ids"].is_array())
+        userinfo["live_room_id"] = cleanId;
+
+        if (!userinfo.contains("live_room_items") || !userinfo["live_room_items"].is_array())
         {
-            userinfo["live_room_ids"] = nlohmann::json::array();
+            userinfo["live_room_items"] = nlohmann::json::array();
         }
 
-        auto& ids = userinfo["live_room_ids"];
-        for (auto it = ids.begin(); it != ids.end();)
+        auto& items = userinfo["live_room_items"];
+        nlohmann::json targetItem;
+        bool found = false;
+
+        for (auto it = items.begin(); it != items.end();)
         {
-            if (it->is_string() && it->get<std::string>() == id)
+            if (it->is_object() && it->value("room_id", "") == cleanId && it->value("platform", 0) == platform)
             {
-                it = ids.erase(it);
+                targetItem = *it;
+                found = true;
+                it = items.erase(it);
             }
             else
             {
                 ++it;
             }
         }
-        ids.insert(ids.begin(), id);
-        while (ids.size() > 5)
+
+        // 手动输入的新直播间（历史记录中原本不存在）：
+        // 若检测到没有开播（或未经过开播检测），不要记录到历史列表中；
+        // 如果是下拉选择的（found == true），则不受影响，正常保留并更新状态。
+        if (!found)
         {
-            ids.erase(ids.end() - 1);
+            if (!fetchedInfo || fetchedInfo->status != LiveStreamStatus::Normal)
+            {
+                m_config->updateConfig(userinfo.dump());
+                return;
+            }
+
+            targetItem["room_id"] = cleanId;
+            targetItem["platform"] = platform;
+            targetItem["anchor_name"] = "";
+            targetItem["avatar_url"] = "";
+            targetItem["title"] = "";
+            targetItem["is_live"] = true;
+        }
+
+        if (fetchedInfo)
+        {
+            if (!fetchedInfo->anchorName.empty())
+                targetItem["anchor_name"] = fetchedInfo->anchorName;
+            if (!fetchedInfo->avatarUrl.empty())
+                targetItem["avatar_url"] = fetchedInfo->avatarUrl;
+            if (!fetchedInfo->title.empty())
+                targetItem["title"] = fetchedInfo->title;
+            targetItem["is_live"] = (fetchedInfo->status == LiveStreamStatus::Normal);
+        }
+
+        items.insert(items.begin(), targetItem);
+
+        // 去除历史上限限制，保留 500 条大容量
+        while (items.size() > 500)
+        {
+            items.erase(items.end() - 1);
         }
 
         m_config->updateConfig(userinfo.dump());
         refreshLiveRoomIds();
+
+        // 若无完整主播信息，触发后台异步刷新
+        if (!fetchedInfo || fetchedInfo->anchorName.empty())
+        {
+            startLiveRoomStatusCheck();
+        }
     }
     catch (const std::exception&)
     {
-        QMessageBox::information(this, "错误", "保存直播间ID失败：配置文件异常", QMessageBox::Yes);
+        QMessageBox::information(this, "错误", "保存直播间失败：配置文件异常", QMessageBox::Yes);
     }
+}
+
+void WindowMain::removeLiveRoomHistory(int row)
+{
+    if (!userinfo.is_object() || !userinfo.contains("live_room_items") || !userinfo["live_room_items"].is_array())
+    {
+        return;
+    }
+    auto& items = userinfo["live_room_items"];
+    if (row >= 0 && row < static_cast<int>(items.size()))
+    {
+        const std::string removedId = items[row].value("room_id", "");
+        items.erase(items.begin() + row);
+        m_config->updateConfig(userinfo.dump());
+
+        const QString curText = ui.lineEditLiveId->currentText().trimmed();
+        if (curText == QString::fromStdString(removedId))
+        {
+            ui.lineEditLiveId->clearEditText();
+        }
+
+        refreshLiveRoomIds();
+        if (ui.lineEditLiveId->view() && ui.lineEditLiveId->view()->viewport())
+        {
+            ui.lineEditLiveId->view()->viewport()->update();
+        }
+    }
+}
+
+void WindowMain::startLiveRoomStatusCheck()
+{
+    if (!userinfo.is_object() || !userinfo.contains("live_room_items") || !userinfo["live_room_items"].is_array())
+    {
+        return;
+    }
+
+    struct CheckTarget {
+        std::string roomId;
+        LivePlatform platform;
+    };
+    std::vector<CheckTarget> targets;
+    for (const auto& item : userinfo["live_room_items"])
+    {
+        if (item.is_object())
+        {
+            std::string rid = item.value("room_id", "");
+            int p = item.value("platform", 0);
+            if (!rid.empty() && (p == static_cast<int>(LivePlatform::Douyin) || p == static_cast<int>(LivePlatform::BiliBili)))
+            {
+                targets.push_back({ rid, static_cast<LivePlatform>(p) });
+                if (targets.size() >= 20) break;
+            }
+        }
+    }
+
+    if (targets.empty())
+    {
+        return;
+    }
+
+    backgroundTasks.start(MakeScannerTask("history: check room status", [this, targets = std::move(targets)]() {
+        std::vector<std::pair<CheckTarget, LiveStreamInfo>> results;
+
+        for (const auto& target : targets)
+        {
+            if (closing.load()) return;
+            auto detail = FetchLiveRoomDetail(target.platform, target.roomId);
+            results.push_back({ target, detail });
+        }
+
+        if (closing.load()) return;
+
+        QMetaObject::invokeMethod(this, [this, results = std::move(results)]() {
+            if (closing.load() || !userinfo.contains("live_room_items") || !userinfo["live_room_items"].is_array())
+            {
+                return;
+            }
+            auto& items = userinfo["live_room_items"];
+            bool anyUpdate = false;
+            for (const auto& [target, info] : results)
+            {
+                for (auto& item : items)
+                {
+                    if (item.is_object() &&
+                        item.value("room_id", "") == target.roomId &&
+                        item.value("platform", 0) == static_cast<int>(target.platform))
+                    {
+                        if (!info.anchorName.empty() && item.value("anchor_name", "") != info.anchorName)
+                        {
+                            item["anchor_name"] = info.anchorName;
+                            anyUpdate = true;
+                        }
+                        if (!info.avatarUrl.empty() && item.value("avatar_url", "") != info.avatarUrl)
+                        {
+                            item["avatar_url"] = info.avatarUrl;
+                            anyUpdate = true;
+                        }
+                        if (!info.title.empty() && item.value("title", "") != info.title)
+                        {
+                            item["title"] = info.title;
+                            anyUpdate = true;
+                        }
+                        bool newLive = (info.status == LiveStreamStatus::Normal);
+                        if (item.value("is_live", false) != newLive)
+                        {
+                            item["is_live"] = newLive;
+                            anyUpdate = true;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (anyUpdate)
+            {
+                m_config->updateConfig(userinfo.dump());
+                refreshLiveRoomIds();
+            }
+        }, Qt::QueuedConnection);
+    }));
 }
 
 void WindowMain::setAccountCheckStatus(int row, bool valid, const QString& status)
@@ -705,13 +1408,50 @@ void WindowMain::pBtStream(bool clicked)
         pBtStop();
         return;
     }
+
+    const auto platform = comboBoxToLivePlatform(ui.comboBox->currentIndex());
+    const QString roomIdText = ui.lineEditLiveId->currentText().trimmed();
+    if (roomIdText.isEmpty())
+    {
+        ui.pBtStream->setChecked(false);
+        QMessageBox::information(this, "提示", "请输入或选择直播间！", QMessageBox::Yes);
+        return;
+    }
+
+    // 校验若当前直播间在记录中且状态为未开播，禁止开启监视
+    const int curPlatform = static_cast<int>(platform);
+    const std::string rawStr = roomIdText.toStdString();
+    const std::string cleanId = (platform == LivePlatform::BiliBili)
+        ? NormalizeBiliRoomID(rawStr)
+        : NormalizeDouyinRoomID(rawStr);
+    const std::string queryId = cleanId.empty() ? rawStr : cleanId;
+
+    if (userinfo.is_object() && userinfo.contains("live_room_items") && userinfo["live_room_items"].is_array())
+    {
+        for (const auto& item : userinfo["live_room_items"])
+        {
+            if (item.is_object() &&
+                item.value("room_id", "") == queryId &&
+                item.value("platform", 0) == curPlatform)
+            {
+                if (!item.value("is_live", false))
+                {
+                    ui.pBtStream->setChecked(false);
+                    ui.pBtStream->setEnabled(false);
+                    ui.pBtStream->setToolTip(QStringLiteral("当前直播间未开播，无法开启监视"));
+                    QMessageBox::information(this, "提示", "当前直播间处于未开播状态，无法开启监视！", QMessageBox::Yes);
+                    return;
+                }
+                break;
+            }
+        }
+    }
+
     ui.pBtstartScreen->setEnabled(false);
     ui.pBtStream->setEnabled(false);
     ui.pBtStream->setText("加载中。。。");
     const auto generation = ++scanGeneration;
     startupActive = clicked;
-    const auto platform = static_cast<LivePlatform>(ui.comboBox->currentIndex());
-    const QString roomIdText = ui.lineEditLiveId->currentText().trimmed();
     if (clicked && !roomIdText.isEmpty())
     {
         saveLiveRoomId(roomIdText);
@@ -794,6 +1534,37 @@ void WindowMain::showEvent(QShowEvent* event)
 
 bool WindowMain::eventFilter(QObject* watched, QEvent* event)
 {
+    if (ui.lineEditLiveId && ui.lineEditLiveId->view() &&
+        watched == ui.lineEditLiveId->view()->viewport())
+    {
+        if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if (me->button() == Qt::LeftButton)
+            {
+                auto* view = ui.lineEditLiveId->view();
+                const QModelIndex index = view->indexAt(me->pos());
+                if (index.isValid())
+                {
+                    const QRect rect = view->visualRect(index);
+                    const int deleteBtnSize = 22;
+                    const int deleteBtnRightMargin = 8;
+                    const QRect deleteBtnRect(rect.right() - deleteBtnRightMargin - deleteBtnSize,
+                                              rect.top() + (rect.height() - deleteBtnSize) / 2,
+                                              deleteBtnSize, deleteBtnSize);
+                    if (deleteBtnRect.contains(me->pos()))
+                    {
+                        if (event->type() == QEvent::MouseButtonRelease)
+                        {
+                            removeLiveRoomHistory(index.row());
+                        }
+                        return true; // 彻底拦截按压与释放事件，防止 QComboBox 选中并填入输入框！
+                    }
+                }
+            }
+        }
+    }
+
     if (watched == ui.labelConfirmDelayHelp || watched == ui.labelScanIntervalHelp)
     {
         if (event->type() == QEvent::Enter || event->type() == QEvent::MouseButtonPress)
@@ -1146,6 +1917,9 @@ bool WindowMain::checkDuplicates(const std::string uid)
 bool WindowMain::GetStreamLink(LivePlatform platform, const std::string& roomid, std::string& url, std::map<std::string, std::string>& heards, quint64 generation)
 {
     auto info = GetLiveInfo(platform, roomid);
+    QMetaObject::invokeMethod(this, [this, roomid, info]() {
+        saveLiveRoomId(QString::fromStdString(roomid), &info);
+    }, Qt::QueuedConnection);
     if (info.status == LiveStreamStatus::Normal)
     {
         url = info.link;
@@ -1294,6 +2068,7 @@ void WindowMain::pBtStop()
     ui.pBtStream->setChecked(false);
     ui.pBtstartScreen->setEnabled(true);
     ui.pBtStream->setEnabled(true);
+    updateCurrentRoomCard();
 }
 
 void WindowMain::configInitUpdate()
@@ -1351,6 +2126,7 @@ void WindowMain::configInitUpdate()
             ui.checkBoxAutoLogin->setChecked(true);
         }
         refreshLiveRoomIds();
+        startLiveRoomStatusCheck();
         applyPlatformFilter();
         startAccountSelfCheck();
     }

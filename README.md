@@ -2,7 +2,7 @@
 
 Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.com/DSVVA/MHY_Scanner) 持续开发，保留米哈游官服扫码功能，并接入库街区账号扫码。
 
-当前发行版本：**v2.0.1**。下载和本版更新说明见 [发布记录](https://github.com/loqwe/ErYouScanner/releases)，历史变化见 [更新日志](CHANGELOG.md)。
+当前发行版本：**v2.0.2**。下载和本版更新说明见 [发布记录](https://github.com/loqwe/ErYouScanner/releases)，历史变化见 [更新日志](CHANGELOG.md)。
 
 有问题请加作者QQ:1654458136  注明来意
 
@@ -20,7 +20,7 @@ Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.
 
 ## 开始使用
 
-将 `ErYouScanner_v2.0.1_win64.zip` **完整解压**到可写目录，启动 `ErYouScanner.exe`。一起保留 DLL、`plugins`、`ScanModel`；不要单独复制 EXE。运行需要 [Visual C++ x64 运行时库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
+将 `ErYouScanner_v2.0.2_win64.zip` **完整解压**到可写目录，启动 `ErYouScanner.exe`。一起保留 DLL、`plugins`、`ScanModel`；不要单独复制 EXE。运行需要 [Visual C++ x64 运行时库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
 
 本版包含 PR #10 的历史直播间列表优化、头像缓存、状态卡片和删除操作；同时保留 PR #8 的抖音直播修复及短信登录修复。
 

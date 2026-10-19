@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.26)
 project(ErYouScanner
-	VERSION 2.0.1
+	VERSION 2.0.2
 	LANGUAGES CXX
 )
 set(ERYOU_DISPLAY_NAME "ErYouScanner")

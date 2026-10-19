@@ -1,4 +1,4 @@
-# ErYouScanner v2.0.1
+# ErYouScanner v2.0.2
 
 完整解压 ZIP，运行 `ErYouScanner.exe`。更新前备份 EXE 旁的 `Config`，保留 DLL、`plugins` 和 `ScanModel`。
 

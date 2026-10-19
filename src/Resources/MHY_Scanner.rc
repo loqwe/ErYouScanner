@@ -27,8 +27,8 @@ IDI_ICON1               ICON                    "MHY_Scanner.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 2,0,1,0
- PRODUCTVERSION 2,0,1,0
+ FILEVERSION 2,0,2,0
+ PRODUCTVERSION 2,0,2,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -45,12 +45,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "ErYouScanner contributors"
             VALUE "FileDescription", "ErYouScanner"
-            VALUE "FileVersion", "2.0.1"
+            VALUE "FileVersion", "2.0.2"
             VALUE "InternalName", "ErYouScanner"
             VALUE "LegalCopyright", "Copyright (C) 2024"
             VALUE "OriginalFilename", "ErYouScanner.exe"
             VALUE "ProductName", "ErYouScanner"
-            VALUE "ProductVersion", "2.0.1"
+            VALUE "ProductVersion", "2.0.2"
         END
     END
     BLOCK "VarFileInfo"

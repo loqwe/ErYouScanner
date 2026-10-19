@@ -557,13 +557,32 @@ LiveStreamInfo LiveDouyin::GetLiveStreamInfo()
         std::string avatarUrl;
         if (data.contains("owner") && data["owner"].is_object())
         {
-            anchorName = data["owner"].value("nickname", "");
-            if (data["owner"].contains("avatar_thumb") && data["owner"]["avatar_thumb"].is_object())
+            const auto& owner = data["owner"];
+            anchorName = owner.value("nickname", "");
+
+            // 抖音不同接口版本会把头像放在 avatar_thumb/avatar_medium/avatar_large 中，
+            // 统一从第一个可用的 url_list 取值，兼容历史记录刷新。
+            for (const char* field : { "avatar_large", "avatar_medium", "avatar_thumb" })
             {
-                const auto& urls = data["owner"]["avatar_thumb"]["url_list"];
-                if (urls.is_array() && !urls.empty() && urls[0].is_string())
+                if (!owner.contains(field) || !owner[field].is_object())
                 {
-                    avatarUrl = urls[0].get<std::string>();
+                    continue;
+                }
+                const auto& urls = owner[field].value("url_list", nlohmann::json::array());
+                if (urls.is_array())
+                {
+                    for (const auto& url : urls)
+                    {
+                        if (url.is_string() && !url.get<std::string>().empty())
+                        {
+                            avatarUrl = url.get<std::string>();
+                            break;
+                        }
+                    }
+                }
+                if (!avatarUrl.empty())
+                {
+                    break;
                 }
             }
         }

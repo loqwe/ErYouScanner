@@ -99,11 +99,13 @@ void preloadAvatar(int platform, const QString& roomId, const QString& avatarUrl
         auto r = cpr::Get(
             cpr::Url{ reqUrl },
             cpr::VerifySsl{ false },
+            cpr::Redirect{ true },
             cpr::Timeout{ 8000 },
             cpr::ConnectTimeout{ 5000 },
             cpr::Header{
                 { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
-                { "Referer", referer }
+                { "Referer", referer },
+                { "Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" }
             });
         if (!r.error && r.status_code == 200 && !r.text.empty())
         {
@@ -280,7 +282,7 @@ WindowMain::WindowMain(QWidget* parent) :
     ui.lineEditLiveId->setItemDelegate(liveRoomDelegate);
     connect(liveRoomDelegate, &LiveRoomItemDelegate::deleteItemRequested, this, &WindowMain::removeLiveRoomHistory);
 
-    ui.lineEditLiveId->setMaxVisibleItems(8);
+    ui.lineEditLiveId->setMaxVisibleItems(5);
     ui.lineEditLiveId->view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     if (ui.lineEditLiveId->view() && ui.lineEditLiveId->view()->viewport())
     {
@@ -321,6 +323,7 @@ WindowMain::WindowMain(QWidget* parent) :
     {
         auto* edit = ui.lineEditLiveId->lineEdit();
         edit->setPlaceholderText("直播间ID或链接");
+        edit->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         edit->setClearButtonEnabled(false); // 彻底关闭 Windows 原生黑圆圈白叉！
         edit->setStyleSheet("QLineEdit { selection-background-color: #087e72; }");
         auto* clearAction = edit->addAction(makeClearButtonIcon(), QLineEdit::TrailingPosition);
@@ -341,6 +344,7 @@ WindowMain::WindowMain(QWidget* parent) :
         updateCurrentRoomCard();
     });
     connect(ui.comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        refreshLiveRoomIds();
         updateCurrentRoomCard();
     });
 
@@ -633,7 +637,7 @@ void WindowMain::updateCurrentRoomCard()
             f.setBold(true);
             f.setPixelSize(avatarSize);
             p.setFont(f);
-            QString ch = anchorName.isEmpty() ? (isBili ? "B" : "抖") : anchorName.left(1);
+            const QString ch = isBili ? QStringLiteral("B") : QStringLiteral("抖");
             p.drawText(rounded.rect(), Qt::AlignCenter, ch);
         }
     }
@@ -646,6 +650,7 @@ void WindowMain::refreshLiveRoomIds()
 {
     const QString currentText = ui.lineEditLiveId->currentText().trimmed();
     QString savedText;
+    const int selectedPlatform = static_cast<int>(comboBoxToLivePlatform(ui.comboBox->currentIndex()));
 
     ui.lineEditLiveId->blockSignals(true);
     ui.lineEditLiveId->clear();
@@ -745,6 +750,10 @@ void WindowMain::refreshLiveRoomIds()
                 continue;
             }
             const int platform = item.value("platform", 0);
+            if (platform != selectedPlatform)
+            {
+                continue;
+            }
             const QString anchorName = QString::fromStdString(item.value("anchor_name", ""));
             const QString avatarUrl = QString::fromStdString(item.value("avatar_url", ""));
             const QString title = QString::fromStdString(item.value("title", ""));
@@ -774,18 +783,36 @@ void WindowMain::refreshLiveRoomIds()
         }
     }
 
-    if (userinfo.contains("live_room_id") && userinfo["live_room_id"].is_string())
+    if (userinfo.contains("live_room_id") && userinfo["live_room_id"].is_string() &&
+        userinfo.value("live_room_platform", selectedPlatform) == selectedPlatform)
     {
         savedText = QString::fromStdString(userinfo["live_room_id"].get<std::string>()).trimmed();
     }
 
-    if (!currentText.isEmpty())
+    bool currentTextIsVisible = false;
+    for (int i = 0; i < ui.lineEditLiveId->count(); ++i)
+    {
+        if (ui.lineEditLiveId->itemData(i, LiveRoomIdRole).toString() == currentText)
+        {
+            currentTextIsVisible = true;
+            break;
+        }
+    }
+
+    if (currentTextIsVisible)
     {
         ui.lineEditLiveId->setCurrentText(currentText);
     }
     else if (!savedText.isEmpty())
     {
-        ui.lineEditLiveId->setCurrentText(savedText);
+        for (int i = 0; i < ui.lineEditLiveId->count(); ++i)
+        {
+            if (ui.lineEditLiveId->itemData(i, LiveRoomIdRole).toString() == savedText)
+            {
+                ui.lineEditLiveId->setCurrentText(savedText);
+                break;
+            }
+        }
     }
 
     ui.lineEditLiveId->blockSignals(false);
@@ -821,6 +848,7 @@ void WindowMain::saveLiveRoomId(const QString& roomId, const LiveStreamInfo* fet
         }
 
         userinfo["live_room_id"] = cleanId;
+        userinfo["live_room_platform"] = platform;
 
         if (!userinfo.contains("live_room_items") || !userinfo["live_room_items"].is_array())
         {
@@ -877,12 +905,6 @@ void WindowMain::saveLiveRoomId(const QString& roomId, const LiveStreamInfo* fet
 
         items.insert(items.begin(), targetItem);
 
-        // 去除历史上限限制，保留 500 条大容量
-        while (items.size() > 500)
-        {
-            items.erase(items.end() - 1);
-        }
-
         m_config->updateConfig(userinfo.dump());
         refreshLiveRoomIds();
 
@@ -905,14 +927,24 @@ void WindowMain::removeLiveRoomHistory(int row)
         return;
     }
     auto& items = userinfo["live_room_items"];
-    if (row >= 0 && row < static_cast<int>(items.size()))
+    if (row >= 0 && row < ui.lineEditLiveId->count())
     {
-        const std::string removedId = items[row].value("room_id", "");
-        items.erase(items.begin() + row);
+        const QString removedId = ui.lineEditLiveId->itemData(row, LiveRoomIdRole).toString();
+        const int removedPlatform = ui.lineEditLiveId->itemData(row, LiveRoomPlatformRole).toInt();
+        auto it = std::find_if(items.begin(), items.end(), [&](const nlohmann::json& item) {
+            return item.is_object() &&
+                QString::fromStdString(item.value("room_id", "")) == removedId &&
+                item.value("platform", 0) == removedPlatform;
+        });
+        if (it == items.end())
+        {
+            return;
+        }
+        items.erase(it);
         m_config->updateConfig(userinfo.dump());
 
         const QString curText = ui.lineEditLiveId->currentText().trimmed();
-        if (curText == QString::fromStdString(removedId))
+        if (curText == removedId)
         {
             ui.lineEditLiveId->clearEditText();
         }

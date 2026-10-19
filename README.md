@@ -22,7 +22,7 @@ Windows 多平台游戏扫码工具，基于 [DSVVA/MHY_Scanner](https://github.
 
 将 `ErYouScanner_v2.0.1_win64.zip` **完整解压**到可写目录，启动 `ErYouScanner.exe`。一起保留 DLL、`plugins`、`ScanModel`；不要单独复制 EXE。运行需要 [Visual C++ x64 运行时库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
 
-v2.0.1 保留 PR #8 的抖音直播修复，修复米哈游短信接口和人机验证白屏，统一英文程序名。详细验证见 [短信修复记录](doc/FIX_v2.0.1_SMS.md)。
+本版包含 PR #10 的历史直播间列表优化、头像缓存、状态卡片和删除操作；同时保留 PR #8 的抖音直播修复及短信登录修复。
 
 选择平台，打开 **账号管理 → 添加账号**：
 

@@ -91,15 +91,8 @@ QPixmap LiveRoomItemDelegate::getAvatarPixmap(int platform, const QString& roomI
         f.setBold(true);
         f.setPixelSize(avatarSize);
         p.setFont(f);
-        QString letter = fallbackChar.trimmed();
-        if (letter.isEmpty())
-        {
-            letter = isBili ? QStringLiteral("B") : QStringLiteral("抖");
-        }
-        else
-        {
-            letter = letter.left(1).toUpper();
-        }
+        Q_UNUSED(fallbackChar);
+        const QString letter = isBili ? QStringLiteral("B") : QStringLiteral("抖");
         p.drawText(placeholder.rect(), Qt::AlignCenter, letter);
     }
     return placeholder;
@@ -138,11 +131,13 @@ void LiveRoomItemDelegate::requestAvatarDownload(int platform, const QString& ro
         auto r = cpr::Get(
             cpr::Url{ reqUrl },
             cpr::VerifySsl{ false },
+            cpr::Redirect{ true },
             cpr::Timeout{ 8000 },
             cpr::ConnectTimeout{ 5000 },
             cpr::Header{
                 { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
-                { "Referer", referer }
+                { "Referer", referer },
+                { "Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" }
             });
 
         if (!r.error && r.status_code == 200 && !r.text.empty())
